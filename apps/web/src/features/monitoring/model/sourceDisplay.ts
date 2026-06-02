@@ -36,6 +36,7 @@ export type MonitoringSourceDisplayInput = {
   authLabel?: string | null;
   account?: string | null;
   apiKeyAlias?: string | null;
+  preferSnapshotMetadata?: boolean;
 };
 
 export type MonitoringSourceDisplayContext = {
@@ -111,21 +112,27 @@ export const buildMonitoringSourceDisplay = (
   const explicitLabel = readString(input.authLabel);
   const explicitAccount = readString(input.account);
 
-  const account = firstReadable(
-    authMeta?.account,
-    explicitAccount,
-    snapshotAccount,
-    explicitLabel,
-    snapshotLabel
-  );
-  const sourceLabel = firstReadable(
-    authMeta?.label,
-    explicitLabel,
-    snapshotLabel,
-    account,
-    sourceMeta.displayName
-  );
-  const provider = firstReadable(authMeta?.provider, snapshotProvider, sourceMeta.type);
+  const account = input.preferSnapshotMetadata
+    ? firstReadable(
+        snapshotAccount,
+        explicitAccount,
+        snapshotLabel,
+        explicitLabel,
+        authMeta?.account
+      )
+    : firstReadable(
+        authMeta?.account,
+        explicitAccount,
+        snapshotAccount,
+        explicitLabel,
+        snapshotLabel
+      );
+  const sourceLabel = input.preferSnapshotMetadata
+    ? firstReadable(snapshotLabel, explicitLabel, account, authMeta?.label, sourceMeta.displayName)
+    : firstReadable(authMeta?.label, explicitLabel, snapshotLabel, account, sourceMeta.displayName);
+  const provider = input.preferSnapshotMetadata
+    ? firstReadable(snapshotProvider, authMeta?.provider, sourceMeta.type)
+    : firstReadable(authMeta?.provider, snapshotProvider, sourceMeta.type);
   const channel = firstReadable(channelMeta?.name, explicitChannel, provider);
   const channelHost = firstReadable(channelMeta?.host);
   const sourceMasked = maskEmailLike(sourceLabel || sourceMeta.displayName);

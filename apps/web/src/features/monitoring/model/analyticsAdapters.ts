@@ -17,7 +17,13 @@ import type {
 import type { CredentialInfo } from '@/types/sourceInfo';
 import { buildSourceInfoMap, resolveSourceDisplay } from '@/utils/sourceResolver';
 import { normalizeAuthIndex, type UsageDetailWithEndpoint } from '@/utils/usage';
-import { formatApiKeyHashLabel, joinUnique, maskAuthIndex, maskEmailLike, readString } from './base';
+import {
+  formatApiKeyHashLabel,
+  joinUnique,
+  maskAuthIndex,
+  maskEmailLike,
+  readString,
+} from './base';
 import { sanitizeApiKeyDisplayText, type ApiKeyDisplayInfo } from './apiKeys';
 import { buildDayLabel, buildHourLabel, buildLocalDayKey, padNumber } from './range';
 import { buildMonitoringSourceDisplay } from './sourceDisplay';
@@ -205,6 +211,51 @@ const resolveAuthMetas = (
     const meta = authMetaMap.get(normalized);
     return meta ? [meta] : [];
   });
+
+const resolveProviderScopedAuthMetas = (
+  authMetas: MonitoringAuthMeta[],
+  providerSnapshot: string | undefined
+) => {
+  const normalizedProvider = normalizeFilterText(providerSnapshot);
+  if (!normalizedProvider) {
+    return authMetas;
+  }
+  const scoped = authMetas.filter(
+    (meta) => normalizeFilterText(meta.provider) === normalizedProvider
+  );
+  return scoped.length > 0 ? scoped : authMetas;
+};
+
+const resolveDisplayAuthIndex = (
+  authIndices: string[] | undefined,
+  authMetaMap: Map<string, MonitoringAuthMeta>,
+  providerSnapshot: string | undefined
+) => {
+  const normalizedProvider = normalizeFilterText(providerSnapshot);
+  if (normalizedProvider) {
+    for (const authIndex of uniqueReadableValues(authIndices)) {
+      const normalized = normalizeAuthIndex(authIndex) ?? authIndex;
+      const meta = authMetaMap.get(normalized);
+      if (meta && normalizeFilterText(meta.provider) === normalizedProvider) {
+        return normalized;
+      }
+    }
+  }
+  return resolveFirstAuthIndex(authIndices);
+};
+
+const resolveScopedChannelNames = (
+  authIndex: string,
+  authMetas: MonitoringAuthMeta[],
+  channelByAuthIndex: Map<string, MonitoringChannelMeta>,
+  providerSnapshot: string | undefined
+) =>
+  uniqueReadableValues([
+    ...authMetas.map((meta) => channelByAuthIndex.get(meta.authIndex)?.name),
+    authIndex !== '-' ? channelByAuthIndex.get(authIndex)?.name : '',
+    ...authMetas.map((meta) => meta.provider),
+    providerSnapshot,
+  ]);
 
 const buildModelSpendRowsFromAnalytics = (
   rows: MonitoringAnalyticsAccountStatRow['models'] = []
@@ -521,15 +572,21 @@ export const buildAccountRowsFromAnalytics = (
 ): MonitoringAccountRow[] =>
   rows
     .map((row) => {
-      const authIndex = resolveFirstAuthIndex(row.auth_indices);
-      const authMetas = resolveAuthMetas(row.auth_indices, authMetaMap);
-      const channelNames = uniqueReadableValues([
-        ...((row.auth_indices || []).map((value) => {
-          const normalized = normalizeAuthIndex(value) ?? value;
-          return channelByAuthIndex.get(normalized)?.name;
-        }) || []),
-        ...authMetas.map((meta) => meta.provider),
-      ]);
+      const authIndex = resolveDisplayAuthIndex(
+        row.auth_indices,
+        authMetaMap,
+        row.auth_provider_snapshot
+      );
+      const authMetas = resolveProviderScopedAuthMetas(
+        resolveAuthMetas(row.auth_indices, authMetaMap),
+        row.auth_provider_snapshot
+      );
+      const channelNames = resolveScopedChannelNames(
+        authIndex,
+        authMetas,
+        channelByAuthIndex,
+        row.auth_provider_snapshot
+      );
       const display = buildMonitoringSourceDisplay(
         {
           source: row.sources?.[0],
@@ -539,11 +596,12 @@ export const buildAccountRowsFromAnalytics = (
           authLabelSnapshot: row.auth_label_snapshot,
           authProviderSnapshot: row.auth_provider_snapshot,
           channel: channelNames[0],
+          preferSnapshotMetadata: true,
         },
         { authMetaMap, authFileMap, sourceInfoMap, channelByAuthIndex }
       );
       const account = firstReadableValue(display.account, row.account_snapshot, row.id);
-      const displayAccount = firstReadableValue(display.primary, account);
+      const displayAccount = firstReadableValue(account, display.primary);
       const authLabels = uniqueReadableValues([
         ...authMetas.map((meta) => meta.label),
         row.auth_label_snapshot,
@@ -600,15 +658,21 @@ export const buildApiKeyRowsFromAnalytics = (
   rows
     .map((row) => {
       const apiKeyHash = readString(row.api_key_hash).toLowerCase();
-      const authIndex = resolveFirstAuthIndex(row.auth_indices);
-      const authMetas = resolveAuthMetas(row.auth_indices, authMetaMap);
-      const channelNames = uniqueReadableValues([
-        ...((row.auth_indices || []).map((value) => {
-          const normalized = normalizeAuthIndex(value) ?? value;
-          return channelByAuthIndex.get(normalized)?.name;
-        }) || []),
-        ...authMetas.map((meta) => meta.provider),
-      ]);
+      const authIndex = resolveDisplayAuthIndex(
+        row.auth_indices,
+        authMetaMap,
+        row.auth_provider_snapshot
+      );
+      const authMetas = resolveProviderScopedAuthMetas(
+        resolveAuthMetas(row.auth_indices, authMetaMap),
+        row.auth_provider_snapshot
+      );
+      const channelNames = resolveScopedChannelNames(
+        authIndex,
+        authMetas,
+        channelByAuthIndex,
+        row.auth_provider_snapshot
+      );
       const display = buildMonitoringSourceDisplay(
         {
           source: row.sources?.[0],
@@ -619,6 +683,7 @@ export const buildApiKeyRowsFromAnalytics = (
           authLabelSnapshot: row.auth_label_snapshot,
           authProviderSnapshot: row.auth_provider_snapshot,
           channel: channelNames[0],
+          preferSnapshotMetadata: true,
         },
         { authMetaMap, authFileMap, sourceInfoMap, channelByAuthIndex }
       );

@@ -114,6 +114,27 @@ func TestExportRequestLogsClampsLegacyCachedTokensAndRedactsSecrets(t *testing.T
 	}
 }
 
+func TestExportRequestLogsInfersMimoProviderFromModel(t *testing.T) {
+	db := newLegacyDB(t)
+	insertLegacyRow(t, db, map[string]any{
+		"id":            31,
+		"timestamp":     "2026-01-02T05:30:00Z",
+		"model":         "mimo-v2.5-pro",
+		"source":        "tp-client-secret",
+		"auth_type":     "apikey",
+		"auth_index":    "mimo-auth",
+		"input_tokens":  10,
+		"output_tokens": 2,
+		"total_tokens":  12,
+	})
+
+	event := exportEvents(t, db)[0]
+	if event.Provider != "mimo" || event.ExecutorType != "mimo" ||
+		event.AuthProviderSnapshot != "mimo" {
+		t.Fatalf("provider identity = %#v", event)
+	}
+}
+
 func TestExportRequestLogsEventHashIsStable(t *testing.T) {
 	db := newLegacyDB(t)
 	insertLegacyRow(t, db, map[string]any{

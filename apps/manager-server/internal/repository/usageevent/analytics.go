@@ -905,12 +905,45 @@ func addProviderCondition(values []string, conditions *[]string, args *[]any) {
 		fmt.Sprintf("lower(coalesce(provider, '')) in (%s)", placeholders),
 		fmt.Sprintf("lower(coalesce(auth_provider_snapshot, '')) in (%s)", placeholders),
 	}
+	modelPatternGroups := providerModelPatternGroups(normalized)
+	for _, patterns := range modelPatternGroups {
+		modelConditions := make([]string, 0, len(patterns)*2)
+		for range patterns {
+			modelConditions = append(
+				modelConditions,
+				"lower(coalesce(model, '')) like ?",
+				"lower(coalesce(resolved_model, '')) like ?",
+			)
+		}
+		providerConditions = append(providerConditions, `(
+			(lower(coalesce(provider, '')) in ('apikey', 'api-key', 'api_key') or lower(coalesce(auth_provider_snapshot, '')) in ('apikey', 'api-key', 'api_key'))
+			and (`+strings.Join(modelConditions, " or ")+`)
+		)`)
+	}
 	*conditions = append(*conditions, "("+strings.Join(providerConditions, " or ")+")")
-	for range providerConditions {
+	for range 2 {
 		for _, value := range normalized {
 			*args = append(*args, value)
 		}
 	}
+	for _, patterns := range modelPatternGroups {
+		for _, pattern := range patterns {
+			*args = append(*args, pattern, pattern)
+		}
+	}
+}
+
+func providerModelPatternGroups(providers []string) [][]string {
+	groups := make([][]string, 0)
+	for _, provider := range providers {
+		switch provider {
+		case "mimo":
+			groups = append(groups, []string{"%mimo%", "%xiaomimimo%"})
+		case "minimax":
+			groups = append(groups, []string{"%minimax%", "%abab%"})
+		}
+	}
+	return groups
 }
 
 func addAccountCondition(values []string, conditions *[]string, args *[]any) {

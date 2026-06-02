@@ -364,6 +364,10 @@ func inferProvider(row requestLogRow) string {
 		return "openai"
 	case strings.Contains(seed, "glm") || strings.Contains(seed, "zhipu") || strings.Contains(row.ChannelName, "智谱"):
 		return "zhipu"
+	case strings.Contains(seed, "mimo") || strings.Contains(seed, "xiaomimimo"):
+		return "mimo"
+	case strings.Contains(seed, "minimax") || strings.Contains(seed, "abab"):
+		return "minimax"
 	case strings.Contains(seed, "deepseek"):
 		return "deepseek"
 	case strings.Contains(seed, "kimi"):

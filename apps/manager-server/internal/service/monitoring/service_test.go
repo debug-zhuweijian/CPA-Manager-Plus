@@ -558,6 +558,75 @@ func TestAnalyticsAppliesAccountFallbackFilter(t *testing.T) {
 	}
 }
 
+func TestAnalyticsNormalizesGenericAPIKeyProviderFromModel(t *testing.T) {
+	db := newMonitoringTestStore(t)
+	ctx := context.Background()
+	fromMS := int64(1_778_250_000_000)
+	toMS := fromMS + 60*60*1000
+
+	event := monitoringEvent("legacy-mimo-provider", fromMS+1_000, "mimo-v2.5-pro", "mimo-auth", "source-mimo", false, 10, 5, 0, 0, 15, nil)
+	event.Provider = "apikey"
+	event.ExecutorType = "apikey"
+	event.AuthType = "apikey"
+	event.AuthProviderSnapshot = "apikey"
+	event.AccountSnapshot = "m:tp-c...6fyc"
+	event.AuthLabelSnapshot = "m:tp-c...6fyc"
+	event.Source = "m:tp-c...6fyc"
+	event.APIKeyHash = "client-key-mimo"
+	if _, err := db.InsertEvents(ctx, []usage.Event{event}); err != nil {
+		t.Fatalf("insert events: %v", err)
+	}
+
+	resp, err := New(db).Analytics(ctx, Request{
+		FromMS: fromMS,
+		ToMS:   toMS,
+		Include: Include{
+			AccountStats:  true,
+			APIKeyStats:   true,
+			ChannelShare:  true,
+			FilterOptions: true,
+			EventsPage:    &EventsPage{Limit: 10},
+		},
+	})
+	if err != nil {
+		t.Fatalf("analytics: %v", err)
+	}
+	if len(resp.AccountStats) != 1 || resp.AccountStats[0].AuthProviderSnapshot != "mimo" {
+		t.Fatalf("account stats = %#v", resp.AccountStats)
+	}
+	if len(resp.APIKeyStats) != 1 || resp.APIKeyStats[0].AuthProviderSnapshot != "mimo" {
+		t.Fatalf("api key stats = %#v", resp.APIKeyStats)
+	}
+	if len(resp.ChannelShare) != 1 || resp.ChannelShare[0].AuthProviderSnapshot != "mimo" {
+		t.Fatalf("channel share = %#v", resp.ChannelShare)
+	}
+	if resp.FilterOptions == nil ||
+		len(resp.FilterOptions.AccountStats) != 1 ||
+		resp.FilterOptions.AccountStats[0].AuthProviderSnapshot != "mimo" {
+		t.Fatalf("filter options = %#v", resp.FilterOptions)
+	}
+	if resp.Events == nil || len(resp.Events.Items) != 1 ||
+		resp.Events.Items[0].AuthProviderSnapshot != "mimo" {
+		t.Fatalf("events = %#v", resp.Events)
+	}
+
+	resp, err = New(db).Analytics(ctx, Request{
+		FromMS: fromMS,
+		ToMS:   toMS,
+		Filters: Filters{
+			Providers: []string{"mimo"},
+		},
+		Include: Include{Summary: true, EventsPage: &EventsPage{Limit: 10}},
+	})
+	if err != nil {
+		t.Fatalf("analytics provider filter: %v", err)
+	}
+	if resp.Summary == nil || resp.Summary.TotalCalls != 1 ||
+		resp.Events == nil || len(resp.Events.Items) != 1 {
+		t.Fatalf("provider-filtered response = %#v", resp)
+	}
+}
+
 func TestAnalyticsFilterOptionsIgnoreActiveScopeFilters(t *testing.T) {
 	db := newMonitoringTestStore(t)
 	ctx := context.Background()

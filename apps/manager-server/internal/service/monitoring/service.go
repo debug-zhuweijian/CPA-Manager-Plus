@@ -757,6 +757,11 @@ func buildChannelShare(stats []store.ChannelModelStat, prices map[string]store.M
 		if authIndex == "" {
 			authIndex = "-"
 		}
+		stat.AuthProviderSnapshot = effectiveProviderSnapshot(
+			stat.AuthProviderSnapshot,
+			stat.Model,
+			stat.BillingModel,
+		)
 		entry := grouped[authIndex]
 		if entry == nil {
 			entry = &accumulator{row: ChannelShareRow{
@@ -832,6 +837,11 @@ type apiKeyStatAccumulator struct {
 func buildAccountStats(stats []store.AccountModelStat, prices map[string]store.ModelPrice) []AccountStatRow {
 	grouped := map[string]*accountStatAccumulator{}
 	for _, stat := range stats {
+		stat.AuthProviderSnapshot = effectiveProviderSnapshot(
+			stat.AuthProviderSnapshot,
+			stat.Model,
+			stat.BillingModel,
+		)
 		id := accountGroupKey(stat.AccountSnapshot, stat.AuthLabelSnapshot, stat.Source, stat.AuthIndex)
 		entry := grouped[id]
 		if entry == nil {
@@ -910,6 +920,11 @@ func buildAccountStats(stats []store.AccountModelStat, prices map[string]store.M
 func buildAPIKeyStats(stats []store.APIKeyModelStat, prices map[string]store.ModelPrice) []APIKeyStatRow {
 	grouped := map[string]*apiKeyStatAccumulator{}
 	for _, stat := range stats {
+		stat.AuthProviderSnapshot = effectiveProviderSnapshot(
+			stat.AuthProviderSnapshot,
+			stat.Model,
+			stat.BillingModel,
+		)
 		id := apiKeyGroupKey(stat.APIKeyHash, stat.SourceHash, stat.AuthIndex, stat.Source, stat.AuthProviderSnapshot)
 		entry := grouped[id]
 		if entry == nil {
@@ -998,6 +1013,60 @@ func fillChannelShareSnapshots(row *ChannelShareRow, stat store.ChannelModelStat
 	}
 	if row.AuthProviderSnapshot == "" {
 		row.AuthProviderSnapshot = stat.AuthProviderSnapshot
+	}
+}
+
+func effectiveProviderSnapshot(provider string, modelNames ...string) string {
+	provider = strings.TrimSpace(provider)
+	if provider != "" && !isGenericAPIKeyProvider(provider) {
+		return provider
+	}
+	for _, modelName := range modelNames {
+		if inferred := inferProviderFromModelName(modelName); inferred != "" {
+			return inferred
+		}
+	}
+	return provider
+}
+
+func isGenericAPIKeyProvider(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "apikey", "api-key", "api_key":
+		return true
+	default:
+		return false
+	}
+}
+
+func inferProviderFromModelName(modelName string) string {
+	normalized := strings.ToLower(strings.TrimSpace(modelName))
+	switch {
+	case normalized == "":
+		return ""
+	case strings.Contains(normalized, "grok") || strings.Contains(normalized, "xai"):
+		return "xai"
+	case strings.Contains(normalized, "gemini") || strings.Contains(normalized, "vertex"):
+		return "gemini"
+	case strings.Contains(normalized, "claude") || strings.Contains(normalized, "anthropic"):
+		return "claude"
+	case strings.Contains(normalized, "codex"):
+		return "codex"
+	case strings.HasPrefix(normalized, "gpt-"):
+		return "openai"
+	case strings.Contains(normalized, "glm") || strings.Contains(normalized, "zhipu"):
+		return "zhipu"
+	case strings.Contains(normalized, "mimo") || strings.Contains(normalized, "xiaomimimo"):
+		return "mimo"
+	case strings.Contains(normalized, "minimax") || strings.Contains(normalized, "abab"):
+		return "minimax"
+	case strings.Contains(normalized, "deepseek"):
+		return "deepseek"
+	case strings.Contains(normalized, "kimi"):
+		return "kimi"
+	case strings.Contains(normalized, "qwen"):
+		return "qwen"
+	default:
+		return ""
 	}
 }
 
@@ -1194,6 +1263,7 @@ func buildTaskBuckets(buckets []store.TaskBucket) []TaskBucketRow {
 func buildRecentFailures(failures []store.RecentFailure) []RecentFailure {
 	result := make([]RecentFailure, 0, len(failures))
 	for _, failure := range failures {
+		providerSnapshot := effectiveProviderSnapshot(failure.AuthProviderSnapshot, failure.Model)
 		result = append(result, RecentFailure{
 			TimestampMS:           failure.TimestampMS,
 			Model:                 failure.Model,
@@ -1203,7 +1273,7 @@ func buildRecentFailures(failures []store.RecentFailure) []RecentFailure {
 			AuthIndex:             failure.AuthIndex,
 			AccountSnapshot:       failure.AccountSnapshot,
 			AuthLabelSnapshot:     failure.AuthLabelSnapshot,
-			AuthProviderSnapshot:  failure.AuthProviderSnapshot,
+			AuthProviderSnapshot:  providerSnapshot,
 			AuthProjectIDSnapshot: failure.AuthProjectIDSnapshot,
 			Endpoint:              failure.Endpoint,
 			DurationMS:            nullableInt(failure.LatencyMS.Valid, failure.LatencyMS.Int64),
@@ -1217,6 +1287,11 @@ func buildRecentFailures(failures []store.RecentFailure) []RecentFailure {
 func buildEvents(page store.EventsPage) *EventsResponse {
 	items := make([]EventRow, 0, len(page.Items))
 	for _, item := range page.Items {
+		providerSnapshot := effectiveProviderSnapshot(
+			item.AuthProviderSnapshot,
+			item.Model,
+			item.ResolvedModel,
+		)
 		items = append(items, EventRow{
 			EventHash:             item.EventHash,
 			TimestampMS:           item.TimestampMS,
@@ -1231,7 +1306,7 @@ func buildEvents(page store.EventsPage) *EventsResponse {
 			APIKeyHash:            item.APIKeyHash,
 			AccountSnapshot:       item.AccountSnapshot,
 			AuthLabelSnapshot:     item.AuthLabelSnapshot,
-			AuthProviderSnapshot:  item.AuthProviderSnapshot,
+			AuthProviderSnapshot:  providerSnapshot,
 			AuthProjectIDSnapshot: item.AuthProjectIDSnapshot,
 			ReasoningEffort:       item.ReasoningEffort,
 			ServiceTier:           item.ServiceTier,

@@ -49,6 +49,7 @@ func (s *Service) proxyWithSavedManagementKey(w http.ResponseWriter, r *http.Req
 		originalDirector(req)
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
+		req.URL.Path = rewriteLegacyCPAProxyPath(req.URL.Path)
 		req.Host = target.Host
 		req.Header.Set("Authorization", "Bearer "+setup.ManagementKey)
 	}
@@ -112,6 +113,19 @@ func IsCPAProxyPath(path string) bool {
 	return false
 }
 
+func rewriteLegacyCPAProxyPath(path string) string {
+	cleaned := strings.TrimRight(path, "/")
+	if _, ok := legacyCPAProxyManagementPaths[cleaned]; ok {
+		return "/v0/management" + cleaned
+	}
+	for _, prefix := range legacyCPAProxyManagementPrefixes {
+		if cleaned == prefix || strings.HasPrefix(cleaned, prefix+"/") {
+			return "/v0/management" + cleaned
+		}
+	}
+	return path
+}
+
 var exactCPAProxyPaths = map[string]struct{}{
 	"/ampcode":                             {},
 	"/api-call":                            {},
@@ -155,6 +169,17 @@ var cpaProxyPathPrefixes = []string{
 	"/auth-files",
 	"/oauth-excluded-models/",
 	"/oauth-model-alias/",
+	"/request-error-logs",
+	"/request-log-by-id",
+}
+
+var legacyCPAProxyManagementPaths = map[string]struct{}{
+	"/logs":                   {},
+	"/logs-max-total-size-mb": {},
+	"/request-log":            {},
+}
+
+var legacyCPAProxyManagementPrefixes = []string{
 	"/request-error-logs",
 	"/request-log-by-id",
 }

@@ -507,6 +507,26 @@ func TestServerCompatProxyRoutes(t *testing.T) {
 		t.Fatalf("config proxy request = %#v", configReq)
 	}
 
+	logsRR := testutil.Request(t, handler, http.MethodGet, "/logs?after=123", "", testutil.AdminKey)
+	testutil.RequireStatus(t, logsRR, http.StatusOK)
+	logsReq, ok := cpa.LastRequest("/v0/management/logs")
+	if !ok {
+		t.Fatal("CPA mock did not receive /v0/management/logs")
+	}
+	if logsReq.Authorization != "Bearer management-key" || logsReq.Query != "after=123" {
+		t.Fatalf("logs proxy request = %#v", logsReq)
+	}
+
+	errorLogsRR := testutil.Request(t, handler, http.MethodGet, "/request-error-logs", "", testutil.AdminKey)
+	testutil.RequireStatus(t, errorLogsRR, http.StatusOK)
+	errorLogsReq, ok := cpa.LastRequest("/v0/management/request-error-logs")
+	if !ok {
+		t.Fatal("CPA mock did not receive /v0/management/request-error-logs")
+	}
+	if errorLogsReq.Authorization != "Bearer management-key" {
+		t.Fatalf("error logs proxy request = %#v", errorLogsReq)
+	}
+
 	modelsReq := httptest.NewRequest(http.MethodGet, "/v1/models?limit=20", nil)
 	modelsReq.Header.Set("Authorization", "Bearer upstream-key")
 	modelsRR := httptest.NewRecorder()

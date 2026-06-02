@@ -3,6 +3,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.manager-server
+      args:
+        VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-none}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
     image: seakee/cpa-manager-plus:latest
     restart: unless-stopped
     ports:

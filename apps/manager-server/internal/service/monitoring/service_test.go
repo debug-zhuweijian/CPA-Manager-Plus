@@ -614,6 +614,33 @@ func TestAnalyticsFilterOptionsIgnoreActiveScopeFilters(t *testing.T) {
 	}
 }
 
+func TestFilterOptionsScopeMatchesOnlyUnfilteredBaseScope(t *testing.T) {
+	base := store.AnalyticsFilter{
+		FromMS:            1,
+		ToMS:              2,
+		SearchQuery:       "gpt",
+		SearchAPIKeyHash:  "hash",
+		IncludeFailed:     true,
+		FailedOnly:        false,
+		ExcludeZeroTokens: false,
+	}
+	if !sameAnalyticsFilter(base, filterOptionsScope(base)) {
+		t.Fatalf("unfiltered scope should be reusable")
+	}
+
+	filtered := base
+	filtered.Models = []string{"gpt-a"}
+	if sameAnalyticsFilter(filtered, filterOptionsScope(filtered)) {
+		t.Fatalf("model-scoped filter options must ignore active filters")
+	}
+
+	successOnly := base
+	successOnly.IncludeFailed = false
+	if sameAnalyticsFilter(successOnly, filterOptionsScope(successOnly)) {
+		t.Fatalf("filter options must include failures even when the active scope hides them")
+	}
+}
+
 func newMonitoringTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "usage.sqlite"))

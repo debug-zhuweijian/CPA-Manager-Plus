@@ -347,7 +347,10 @@ func (s *Service) Analytics(ctx context.Context, req Request) (Response, error) 
 	}
 
 	var modelStats []store.ModelStat
-	needsModelStats := req.Include.Summary || req.Include.ModelShare || req.Include.ModelStats
+	optionFilter := filterOptionsScope(filter)
+	reuseFilterOptionStats := req.Include.FilterOptions && sameAnalyticsFilter(filter, optionFilter)
+
+	needsModelStats := req.Include.Summary || req.Include.ModelShare || req.Include.ModelStats || reuseFilterOptionStats
 	if needsModelStats {
 		modelStats, err = s.store.ModelStatsWithFilter(ctx, filter, 0)
 		if err != nil {
@@ -358,6 +361,30 @@ func (s *Service) Analytics(ctx context.Context, req Request) (Response, error) 
 	var taskBuckets []store.TaskBucket
 	if req.Include.Summary || req.Include.TaskBuckets {
 		taskBuckets, err = s.store.TaskBucketsWithFilter(ctx, filter)
+		if err != nil {
+			return Response{}, err
+		}
+	}
+
+	var channelStats []store.ChannelModelStat
+	if req.Include.ChannelShare || reuseFilterOptionStats {
+		channelStats, err = s.store.ChannelModelStatsWithFilter(ctx, filter)
+		if err != nil {
+			return Response{}, err
+		}
+	}
+
+	var accountStats []store.AccountModelStat
+	if req.Include.AccountStats || reuseFilterOptionStats {
+		accountStats, err = s.store.AccountModelStatsWithFilter(ctx, filter)
+		if err != nil {
+			return Response{}, err
+		}
+	}
+
+	var apiKeyStats []store.APIKeyModelStat
+	if req.Include.APIKeyStats || reuseFilterOptionStats {
+		apiKeyStats, err = s.store.APIKeyModelStatsWithFilter(ctx, filter)
 		if err != nil {
 			return Response{}, err
 		}
@@ -406,11 +433,7 @@ func (s *Service) Analytics(ctx context.Context, req Request) (Response, error) 
 		response.ModelStats = buildModelStats(modelStats, prices)
 	}
 	if req.Include.ChannelShare {
-		stats, err := s.store.ChannelModelStatsWithFilter(ctx, filter)
-		if err != nil {
-			return Response{}, err
-		}
-		response.ChannelShare = buildChannelShare(stats, prices)
+		response.ChannelShare = buildChannelShare(channelStats, prices)
 	}
 	if req.Include.FailureSources {
 		stats, err := s.store.FailureSourcesWithFilter(ctx, filter)
@@ -420,25 +443,27 @@ func (s *Service) Analytics(ctx context.Context, req Request) (Response, error) 
 		response.FailureSources = buildFailureSources(stats)
 	}
 	if req.Include.AccountStats {
-		stats, err := s.store.AccountModelStatsWithFilter(ctx, filter)
-		if err != nil {
-			return Response{}, err
-		}
-		response.AccountStats = buildAccountStats(stats, prices)
+		response.AccountStats = buildAccountStats(accountStats, prices)
 	}
 	if req.Include.APIKeyStats {
-		stats, err := s.store.APIKeyModelStatsWithFilter(ctx, filter)
-		if err != nil {
-			return Response{}, err
-		}
-		response.APIKeyStats = buildAPIKeyStats(stats, prices)
+		response.APIKeyStats = buildAPIKeyStats(apiKeyStats, prices)
 	}
 	if req.Include.FilterOptions {
-		options, err := s.filterOptions(ctx, filter, prices)
-		if err != nil {
-			return Response{}, err
+		if reuseFilterOptionStats {
+			response.FilterOptions = buildFilterOptionsFromStats(
+				accountStats,
+				apiKeyStats,
+				channelStats,
+				modelStats,
+				prices,
+			)
+		} else {
+			options, err := s.filterOptions(ctx, optionFilter, prices)
+			if err != nil {
+				return Response{}, err
+			}
+			response.FilterOptions = options
 		}
-		response.FilterOptions = options
 	}
 	if req.Include.TaskBuckets {
 		response.TaskBuckets = buildTaskBuckets(taskBuckets)
@@ -494,18 +519,47 @@ func buildFilter(req Request) store.AnalyticsFilter {
 	}
 }
 
-func (s *Service) filterOptions(ctx context.Context, filter store.AnalyticsFilter, prices map[string]store.ModelPrice) (*FilterOptions, error) {
-	optionFilter := filter
-	optionFilter.Models = nil
-	optionFilter.Providers = nil
-	optionFilter.Accounts = nil
-	optionFilter.AuthIndices = nil
-	optionFilter.APIKeyHashes = nil
-	optionFilter.SourceHashes = nil
-	optionFilter.IncludeFailed = true
-	optionFilter.FailedOnly = false
-	optionFilter.ExcludeZeroTokens = false
+func filterOptionsScope(filter store.AnalyticsFilter) store.AnalyticsFilter {
+	return store.AnalyticsFilter{
+		FromMS:            filter.FromMS,
+		ToMS:              filter.ToMS,
+		SearchQuery:       filter.SearchQuery,
+		SearchAPIKeyHash:  filter.SearchAPIKeyHash,
+		IncludeFailed:     true,
+		FailedOnly:        false,
+		ExcludeZeroTokens: false,
+	}
+}
 
+func sameAnalyticsFilter(left store.AnalyticsFilter, right store.AnalyticsFilter) bool {
+	return left.FromMS == right.FromMS &&
+		left.ToMS == right.ToMS &&
+		left.SearchQuery == right.SearchQuery &&
+		left.SearchAPIKeyHash == right.SearchAPIKeyHash &&
+		left.IncludeFailed == right.IncludeFailed &&
+		left.FailedOnly == right.FailedOnly &&
+		left.ExcludeZeroTokens == right.ExcludeZeroTokens &&
+		sameStringSlice(left.Models, right.Models) &&
+		sameStringSlice(left.Providers, right.Providers) &&
+		sameStringSlice(left.Accounts, right.Accounts) &&
+		sameStringSlice(left.AuthIndices, right.AuthIndices) &&
+		sameStringSlice(left.APIKeyHashes, right.APIKeyHashes) &&
+		sameStringSlice(left.SourceHashes, right.SourceHashes)
+}
+
+func sameStringSlice(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Service) filterOptions(ctx context.Context, optionFilter store.AnalyticsFilter, prices map[string]store.ModelPrice) (*FilterOptions, error) {
 	accountStats, err := s.store.AccountModelStatsWithFilter(ctx, optionFilter)
 	if err != nil {
 		return nil, err
@@ -523,12 +577,22 @@ func (s *Service) filterOptions(ctx context.Context, filter store.AnalyticsFilte
 		return nil, err
 	}
 
+	return buildFilterOptionsFromStats(accountStats, apiKeyStats, channelStats, modelStats, prices), nil
+}
+
+func buildFilterOptionsFromStats(
+	accountStats []store.AccountModelStat,
+	apiKeyStats []store.APIKeyModelStat,
+	channelStats []store.ChannelModelStat,
+	modelStats []store.ModelStat,
+	prices map[string]store.ModelPrice,
+) *FilterOptions {
 	return &FilterOptions{
 		AccountStats: buildAccountStats(accountStats, prices),
 		APIKeyStats:  buildAPIKeyStats(apiKeyStats, prices),
 		ChannelShare: buildChannelShare(channelStats, prices),
 		ModelStats:   buildModelStats(modelStats, prices),
-	}, nil
+	}
 }
 
 func normalizeGranularity(input string, fromMS int64, toMS int64) string {

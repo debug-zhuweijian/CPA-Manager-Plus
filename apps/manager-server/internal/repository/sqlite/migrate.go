@@ -159,6 +159,9 @@ func Migrate(db *sql.DB) error {
 	if err := ensureUsageEventSnapshotColumns(db); err != nil {
 		return err
 	}
+	if err := ensureUsageEventMonitoringIndexes(db); err != nil {
+		return err
+	}
 	if err := ensureCodexInspectionRunColumns(db); err != nil {
 		return err
 	}
@@ -166,6 +169,25 @@ func Migrate(db *sql.DB) error {
 		return err
 	}
 	return ensureModelPriceColumns(db)
+}
+
+func ensureUsageEventMonitoringIndexes(db *sql.DB) error {
+	statements := []string{
+		`create index if not exists idx_usage_events_timestamp_id_desc on usage_events(timestamp_ms desc, id desc)`,
+		`create index if not exists idx_usage_events_failed_timestamp_id_desc on usage_events(failed, timestamp_ms desc, id desc)`,
+		`create index if not exists idx_usage_events_timestamp_model_resolved on usage_events(timestamp_ms, model, resolved_model)`,
+		`create index if not exists idx_usage_events_timestamp_auth_model on usage_events(timestamp_ms, auth_index, model, resolved_model)`,
+		`create index if not exists idx_usage_events_timestamp_account_model on usage_events(timestamp_ms, account_snapshot, auth_label_snapshot, auth_provider_snapshot, provider, auth_index, source_hash, model, resolved_model)`,
+		`create index if not exists idx_usage_events_timestamp_api_key_model on usage_events(timestamp_ms, api_key_hash, account_snapshot, auth_label_snapshot, auth_provider_snapshot, provider, auth_index, source_hash, model, resolved_model)`,
+		`create index if not exists idx_usage_events_timestamp_source_failure on usage_events(timestamp_ms, source_hash, auth_index, failed)`,
+		`create index if not exists idx_usage_events_timestamp_total_failed_model on usage_events(timestamp_ms, total_tokens, failed, model)`,
+	}
+	for _, statement := range statements {
+		if _, err := db.Exec(statement); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ensureCodexInspectionRunColumns(db *sql.DB) error {

@@ -62,6 +62,9 @@ export interface UsageServiceCollectorStatus {
 
 export interface UsageServiceStatus {
   service?: string;
+  version?: string;
+  commit?: string;
+  buildDate?: string;
   dbPath?: string;
   events?: number;
   deadLetters?: number;

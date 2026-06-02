@@ -290,6 +290,9 @@ func TestServerCompatStatusAuthAndCounts(t *testing.T) {
 	testutil.RequireStatus(t, statusRR, http.StatusOK)
 	if !strings.Contains(statusRR.Body.String(), `"events":1`) ||
 		!strings.Contains(statusRR.Body.String(), `"deadLetters":1`) ||
+		!strings.Contains(statusRR.Body.String(), `"version":"dev"`) ||
+		!strings.Contains(statusRR.Body.String(), `"commit":"none"`) ||
+		!strings.Contains(statusRR.Body.String(), `"buildDate":"unknown"`) ||
 		!strings.Contains(statusRR.Body.String(), `"collector"`) {
 		t.Fatalf("status body = %s", statusRR.Body.String())
 	}

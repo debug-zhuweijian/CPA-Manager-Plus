@@ -338,6 +338,9 @@ export function MonitoringCenterPage() {
   useHeaderRefresh(refreshAll);
   useInterval(
     () => {
+      if (monitoringLoading) {
+        return;
+      }
       void refreshAll().catch(() => {});
     },
     connectionStatus === 'connected' && Number(autoRefreshMs) > 0 ? Number(autoRefreshMs) : null

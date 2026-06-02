@@ -139,6 +139,70 @@ interface MonitoringPresentationSnapshotStore {
   lastStableSnapshot: MonitoringPresentationSnapshot | null;
 }
 
+const createMonitoringPresentationSnapshotStore = (): MonitoringPresentationSnapshotStore => ({
+  cachedSnapshots: new Map(),
+  lastStableSnapshot: null,
+});
+
+const sharedMonitoringPresentationSnapshotStore = createMonitoringPresentationSnapshotStore();
+
+const cloneMonitoringPresentationSnapshotStore = (
+  store: MonitoringPresentationSnapshotStore
+): MonitoringPresentationSnapshotStore => ({
+  cachedSnapshots: new Map(store.cachedSnapshots),
+  lastStableSnapshot: store.lastStableSnapshot,
+});
+
+const rememberMonitoringPresentationSnapshot = (
+  store: MonitoringPresentationSnapshotStore,
+  scopeKey: string,
+  snapshot: MonitoringPresentationSnapshot
+): MonitoringPresentationSnapshotStore => {
+  if (store.lastStableSnapshot === snapshot && store.cachedSnapshots.get(scopeKey) === snapshot) {
+    return store;
+  }
+
+  const cachedSnapshots = new Map(store.cachedSnapshots);
+  cachedSnapshots.set(scopeKey, snapshot);
+  while (cachedSnapshots.size > MONITORING_PRESENTATION_CACHE_LIMIT) {
+    const oldestKey = cachedSnapshots.keys().next().value;
+    if (oldestKey === undefined) break;
+    cachedSnapshots.delete(oldestKey);
+  }
+
+  return {
+    cachedSnapshots,
+    lastStableSnapshot: snapshot,
+  };
+};
+
+const writeSharedMonitoringPresentationSnapshotStore = (
+  store: MonitoringPresentationSnapshotStore
+) => {
+  sharedMonitoringPresentationSnapshotStore.cachedSnapshots = new Map(store.cachedSnapshots);
+  sharedMonitoringPresentationSnapshotStore.lastStableSnapshot = store.lastStableSnapshot;
+};
+
+export const clearSharedMonitoringPresentationSnapshotStoreForTest = () => {
+  writeSharedMonitoringPresentationSnapshotStore(createMonitoringPresentationSnapshotStore());
+};
+
+export const readSharedMonitoringPresentationSnapshotStoreForTest = () =>
+  cloneMonitoringPresentationSnapshotStore(sharedMonitoringPresentationSnapshotStore);
+
+export const rememberSharedMonitoringPresentationSnapshotForTest = (
+  scopeKey: string,
+  snapshot: MonitoringPresentationSnapshot
+) => {
+  const nextStore = rememberMonitoringPresentationSnapshot(
+    sharedMonitoringPresentationSnapshotStore,
+    scopeKey,
+    snapshot
+  );
+  writeSharedMonitoringPresentationSnapshotStore(nextStore);
+  return cloneMonitoringPresentationSnapshotStore(sharedMonitoringPresentationSnapshotStore);
+};
+
 const createEventsPageState = (scopeKey = ''): MonitoringEventsPageState => ({
   scopeKey,
   beforeMs: null,
@@ -284,10 +348,9 @@ export function useMonitoringData({
     createEventsPageState()
   );
   const [presentationSnapshotStore, setPresentationSnapshotStore] =
-    useState<MonitoringPresentationSnapshotStore>(() => ({
-      cachedSnapshots: new Map(),
-      lastStableSnapshot: null,
-    }));
+    useState<MonitoringPresentationSnapshotStore>(() =>
+      cloneMonitoringPresentationSnapshotStore(sharedMonitoringPresentationSnapshotStore)
+    );
 
   const analyticsBounds = useMemo(() => {
     const bounds = getRangeBounds(timeRange, analyticsNowMs, customTimeRange);
@@ -785,52 +848,43 @@ export function useMonitoringData({
   );
 
   useEffect(() => {
-    if (analytics.dataStale) return;
+    if (analytics.dataStale || !analyticsData) return;
 
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
       setPresentationSnapshotStore((previous) => {
-        if (
-          previous.lastStableSnapshot === computedPresentationSnapshot &&
-          previous.cachedSnapshots.get(eventsScopeKey) === computedPresentationSnapshot
-        ) {
-          return previous;
-        }
-
-        const cachedSnapshots = new Map(previous.cachedSnapshots);
-        cachedSnapshots.set(eventsScopeKey, computedPresentationSnapshot);
-        while (cachedSnapshots.size > MONITORING_PRESENTATION_CACHE_LIMIT) {
-          const oldestKey = cachedSnapshots.keys().next().value;
-          if (oldestKey === undefined) break;
-          cachedSnapshots.delete(oldestKey);
-        }
-        return {
-          cachedSnapshots,
-          lastStableSnapshot: computedPresentationSnapshot,
-        };
+        const nextStore = rememberMonitoringPresentationSnapshot(
+          previous,
+          eventsScopeKey,
+          computedPresentationSnapshot
+        );
+        writeSharedMonitoringPresentationSnapshotStore(nextStore);
+        return nextStore;
       });
     });
     return () => {
       cancelled = true;
     };
-  }, [analytics.dataStale, computedPresentationSnapshot, eventsScopeKey]);
+  }, [analytics.dataStale, analyticsData, computedPresentationSnapshot, eventsScopeKey]);
+
+  const shouldUsePresentationFallback = analytics.dataStale || !analyticsData;
 
   const presentationResolution = useMemo(
     () =>
       resolveMonitoringPresentationSnapshot({
         computedSnapshot: computedPresentationSnapshot,
         scopeKey: eventsScopeKey,
-        dataStale: analytics.dataStale,
+        dataStale: shouldUsePresentationFallback,
         cachedSnapshots: presentationSnapshotStore.cachedSnapshots,
         lastStableSnapshot: presentationSnapshotStore.lastStableSnapshot,
       }),
     [
-      analytics.dataStale,
       computedPresentationSnapshot,
       eventsScopeKey,
       presentationSnapshotStore.cachedSnapshots,
       presentationSnapshotStore.lastStableSnapshot,
+      shouldUsePresentationFallback,
     ]
   );
   const presentationSnapshot = presentationResolution.snapshot;
@@ -880,7 +934,7 @@ export function useMonitoringData({
     eventsHasMore: presentationSnapshot.eventsHasMore,
     eventsLoadingMore: presentationSnapshot.eventsLoadingMore,
     lastRefreshedAt: presentationSnapshot.lastRefreshedAt,
-    isTransitioningScope: analytics.dataStale,
+    isTransitioningScope: shouldUsePresentationFallback,
     hasPresentationSnapshot: presentationResolution.hasPresentationSnapshot,
     refreshMeta,
     loadMoreEvents,

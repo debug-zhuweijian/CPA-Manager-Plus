@@ -38,13 +38,13 @@ import {
 import { parseLogLine } from './hooks/logParsing';
 import { useLogFilters } from './hooks/useLogFilters';
 import { isNearBottom, useLogScroller } from './hooks/useLogScroller';
+import {
+  readLogsPageSessionCache,
+  writeLogsPageSessionCache,
+  type ErrorLogItem,
+  type LogsPageTab,
+} from './logsPageSessionCache';
 import styles from './LogsPage.module.scss';
-
-interface ErrorLogItem {
-  name: string;
-  size?: number;
-  modified?: number;
-}
 
 // 初始只渲染最近 100 行，滚动到顶部再逐步加载更多（避免一次性渲染过多导致卡顿）
 const INITIAL_DISPLAY_LINES = 100;
@@ -62,7 +62,7 @@ const getErrorMessage = (err: unknown): string => {
   return typeof message === 'string' ? message : '';
 };
 
-type TabType = 'logs' | 'errors';
+type TabType = LogsPageTab;
 
 export function LogsPage() {
   const { t } = useTranslation();
@@ -71,12 +71,20 @@ export function LogsPage() {
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
   const config = useConfigStore((state) => state.config);
   const requestLogEnabled = config?.requestLog ?? false;
+  const initialSessionCacheRef = useRef<ReturnType<typeof readLogsPageSessionCache> | null>(null);
+  if (initialSessionCacheRef.current === null) {
+    initialSessionCacheRef.current = readLogsPageSessionCache();
+  }
+  const initialSessionCache = initialSessionCacheRef.current;
 
   const [activeTab, setActiveTab] = useState<TabType>(() =>
-    searchParams.get('tab') === 'errors' ? 'errors' : 'logs'
+    searchParams.get('tab') === 'errors' ? 'errors' : initialSessionCache.activeTab
   );
-  const [logState, setLogState] = useState<LogState>({ buffer: [], visibleFrom: 0 });
-  const [loading, setLoading] = useState(true);
+  const [logState, setLogState] = useState<LogState>(() => initialSessionCache.logState);
+  const [loading, setLoading] = useState(
+    () => connectionStatus === 'connected' && initialSessionCache.logState.buffer.length === 0
+  );
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [autoRefresh, setAutoRefresh] = useLocalStorage('logsPage.autoRefresh', false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -90,7 +98,7 @@ export function LogsPage() {
     'logsPage.structuredFiltersExpanded',
     true
   );
-  const [errorLogs, setErrorLogs] = useState<ErrorLogItem[]>([]);
+  const [errorLogs, setErrorLogs] = useState<ErrorLogItem[]>(() => initialSessionCache.errorLogs);
   const [loadingErrors, setLoadingErrors] = useState(false);
   const [errorLogsError, setErrorLogsError] = useState('');
   const [requestLogId, setRequestLogId] = useState<string | null>(null);
@@ -107,12 +115,13 @@ export function LogsPage() {
   const pendingFullReloadRef = useRef(false);
 
   // 保存最新时间戳用于增量获取
-  const latestTimestampRef = useRef<number>(0);
+  const latestTimestampRef = useRef<number>(initialSessionCache.latestTimestamp);
 
   const disableControls = connectionStatus !== 'connected';
 
   const handleTabChange = (tab: TabType) => {
     setActiveTab(tab);
+    writeLogsPageSessionCache({ activeTab: tab });
     const nextParams = new URLSearchParams(searchParams);
     if (tab === 'errors') {
       nextParams.set('tab', 'errors');
@@ -125,6 +134,7 @@ export function LogsPage() {
   const loadLogs = async (incremental = false) => {
     if (connectionStatus !== 'connected') {
       setLoading(false);
+      setRefreshing(false);
       return;
     }
 
@@ -137,8 +147,14 @@ export function LogsPage() {
 
     logRequestInFlightRef.current = true;
 
+    const canUseExistingLogs = logState.buffer.length > 0;
+    const backgroundRefresh = !incremental && canUseExistingLogs;
     if (!incremental) {
-      setLoading(true);
+      if (backgroundRefresh) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
     }
     setError('');
 
@@ -175,13 +191,30 @@ export function LogsPage() {
             visibleFrom = Math.max(buffer.length - prevRenderedCount, 0);
           }
 
-          return { buffer, visibleFrom };
+          const nextState = { buffer, visibleFrom };
+          writeLogsPageSessionCache({
+            logState: nextState,
+            latestTimestamp: latestTimestampRef.current,
+            lastLoadedAt: Date.now(),
+          });
+          return nextState;
+        });
+      } else if (incremental) {
+        writeLogsPageSessionCache({
+          latestTimestamp: latestTimestampRef.current,
+          lastLoadedAt: Date.now(),
         });
       } else if (!incremental) {
         // 全量加载：默认只渲染最后 100 行，向上滚动再展开更多
         const buffer = newLines.slice(-MAX_BUFFER_LINES);
         const visibleFrom = Math.max(buffer.length - INITIAL_DISPLAY_LINES, 0);
-        setLogState({ buffer, visibleFrom });
+        const nextState = { buffer, visibleFrom };
+        setLogState(nextState);
+        writeLogsPageSessionCache({
+          logState: nextState,
+          latestTimestamp: latestTimestampRef.current,
+          lastLoadedAt: Date.now(),
+        });
       }
     } catch (err: unknown) {
       console.error('Failed to load logs:', err);
@@ -191,6 +224,7 @@ export function LogsPage() {
     } finally {
       if (!incremental) {
         setLoading(false);
+        setRefreshing(false);
       }
       logRequestInFlightRef.current = false;
       if (pendingFullReloadRef.current) {
@@ -211,8 +245,14 @@ export function LogsPage() {
       onConfirm: async () => {
         try {
           await logsApi.clearLogs();
-          setLogState({ buffer: [], visibleFrom: 0 });
+          const nextState = { buffer: [], visibleFrom: 0 };
+          setLogState(nextState);
           latestTimestampRef.current = 0;
+          writeLogsPageSessionCache({
+            logState: nextState,
+            latestTimestamp: 0,
+            lastLoadedAt: Date.now(),
+          });
           showNotification(t('logs.clear_success'), 'success');
         } catch (err: unknown) {
           const message = getErrorMessage(err);
@@ -237,12 +277,18 @@ export function LogsPage() {
       return;
     }
 
-    setLoadingErrors(true);
+    setLoadingErrors(errorLogs.length === 0);
     setErrorLogsError('');
     try {
       const res = await logsApi.fetchErrorLogs();
       // API 返回 { files: [...] }
-      setErrorLogs(Array.isArray(res.files) ? res.files : []);
+      const nextErrorLogs = Array.isArray(res.files) ? res.files : [];
+      setErrorLogs(nextErrorLogs);
+      writeLogsPageSessionCache({
+        errorLogs: nextErrorLogs,
+        activeTab,
+        lastLoadedAt: Date.now(),
+      });
     } catch (err: unknown) {
       console.error('Failed to load error logs:', err);
       setErrorLogs([]);
@@ -270,14 +316,17 @@ export function LogsPage() {
   };
 
   useEffect(() => {
-    const tab = searchParams.get('tab') === 'errors' ? 'errors' : 'logs';
+    const tabParam = searchParams.get('tab');
+    if (tabParam === null) return;
+    const tab = tabParam === 'errors' ? 'errors' : 'logs';
     setActiveTab((current) => (current === tab ? current : tab));
+    writeLogsPageSessionCache({ activeTab: tab });
   }, [searchParams]);
 
   useEffect(() => {
     if (connectionStatus === 'connected') {
-      latestTimestampRef.current = 0;
-      loadLogs(false);
+      const canRefreshIncrementally = latestTimestampRef.current > 0 && logState.buffer.length > 0;
+      loadLogs(canRefreshIncrementally);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectionStatus]);
@@ -665,7 +714,7 @@ export function LogsPage() {
                   variant="secondary"
                   size="sm"
                   onClick={() => loadLogs(false)}
-                  disabled={disableControls || loading}
+                  disabled={disableControls || loading || refreshing}
                   className={styles.actionButton}
                 >
                   <span className={styles.buttonContent}>
@@ -673,6 +722,9 @@ export function LogsPage() {
                     {t('logs.refresh_button')}
                   </span>
                 </Button>
+                {refreshing && !loading && (
+                  <span className={styles.refreshingHint}>{t('common.refreshing')}</span>
+                )}
                 <ToggleSwitch
                   checked={autoRefresh}
                   onChange={(value) => setAutoRefresh(value)}

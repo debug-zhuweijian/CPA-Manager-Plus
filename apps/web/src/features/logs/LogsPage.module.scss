@@ -309,6 +309,15 @@
   white-space: nowrap;
 }
 
+.refreshingHint {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .buttonContent {
   display: inline-flex;
   align-items: center;

@@ -359,10 +359,11 @@ export function MonitoringCenterPage() {
       : requestMonitoringAvailability.reason === 'service_unavailable'
         ? t('monitoring.request_monitoring_service_unavailable_body')
         : t('monitoring.request_monitoring_not_configured_body');
-  const monitoringBlockingLoading =
-    monitoringLoading && (!monitoringScopeTransitioning || !hasMonitoringPresentationSnapshot);
+  const monitoringBlockingLoading = monitoringLoading && !hasMonitoringPresentationSnapshot;
   const overallLoading =
-    usageLoading || monitoringBlockingLoading || requestMonitoringAvailability.checking;
+    usageLoading ||
+    monitoringBlockingLoading ||
+    (requestMonitoringAvailability.checking && !hasMonitoringPresentationSnapshot);
   const combinedError = monitoringUnavailable
     ? monitoringError
     : [usageError, monitoringError].filter(Boolean).join('；');
@@ -1165,9 +1166,7 @@ export function MonitoringCenterPage() {
     <div className={styles.page}>
       <MonitoringStatusHeader
         showLoadingOverlay={
-          overallLoading &&
-          filteredRows.length === 0 &&
-          (!monitoringScopeTransitioning || !hasMonitoringPresentationSnapshot)
+          overallLoading && filteredRows.length === 0 && !hasMonitoringPresentationSnapshot
         }
         monitoringUnavailable={monitoringUnavailable}
         monitoringUnavailableTitle={monitoringUnavailableTitle}

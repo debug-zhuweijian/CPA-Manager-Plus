@@ -6,11 +6,14 @@ import {
   buildMonitoringEventsScopeKey,
   buildMonitoringAuthMetaMap,
   buildMonitoringSummary,
+  clearSharedMonitoringPresentationSnapshotStoreForTest,
   buildRangeFilteredRows,
   buildScopeFilteredRows,
   mergeMonitoringEventsPageItems,
+  readSharedMonitoringPresentationSnapshotStoreForTest,
   resolveMonitoringDisplayEventItems,
   resolveMonitoringPresentationSnapshot,
+  rememberSharedMonitoringPresentationSnapshotForTest,
   type MonitoringEventRow,
   type MonitoringPresentationSnapshot,
 } from './useMonitoringData';
@@ -654,5 +657,42 @@ describe('resolveMonitoringPresentationSnapshot', () => {
     expect(result.snapshot).toBe(computed);
     expect(result.hasPresentationSnapshot).toBe(true);
     expect(result.usingSnapshotFallback).toBe(false);
+  });
+});
+
+describe('shared monitoring presentation snapshot store', () => {
+  it('keeps the last stable snapshot available across hook remounts', () => {
+    clearSharedMonitoringPresentationSnapshotStoreForTest();
+    const cached = createPresentationSnapshot('cached-all');
+
+    rememberSharedMonitoringPresentationSnapshotForTest('all', cached);
+    const store = readSharedMonitoringPresentationSnapshotStoreForTest();
+    const result = resolveMonitoringPresentationSnapshot({
+      computedSnapshot: createPresentationSnapshot('cold-empty'),
+      scopeKey: 'all',
+      dataStale: true,
+      cachedSnapshots: store.cachedSnapshots,
+      lastStableSnapshot: store.lastStableSnapshot,
+    });
+
+    expect(result.snapshot).toBe(cached);
+    expect(result.hasPresentationSnapshot).toBe(true);
+    expect(result.usingSnapshotFallback).toBe(true);
+  });
+
+  it('caps shared cached scopes to the presentation cache limit', () => {
+    clearSharedMonitoringPresentationSnapshotStoreForTest();
+
+    for (let index = 0; index < 30; index += 1) {
+      rememberSharedMonitoringPresentationSnapshotForTest(
+        `scope-${index}`,
+        createPresentationSnapshot(`scope-${index}`)
+      );
+    }
+
+    const store = readSharedMonitoringPresentationSnapshotStoreForTest();
+    expect(store.cachedSnapshots.size).toBe(24);
+    expect(store.cachedSnapshots.has('scope-0')).toBe(false);
+    expect(store.cachedSnapshots.has('scope-29')).toBe(true);
   });
 });

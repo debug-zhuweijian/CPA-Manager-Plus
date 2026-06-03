@@ -348,6 +348,78 @@ func TestAnalyticsAppliesFilters(t *testing.T) {
 	}
 }
 
+func TestAnalyticsPreservesRequestedHistoricalWindow(t *testing.T) {
+	db := newMonitoringTestStore(t)
+	ctx := context.Background()
+	nowMS := int64(1_778_400_000_000)
+	fourteenDaysMS := int64(14 * 24 * 60 * 60 * 1000)
+	thirtyDaysMS := int64(30 * 24 * 60 * 60 * 1000)
+
+	inside14d := monitoringEvent("inside-14d", nowMS-fourteenDaysMS+1, "glm-5.1", "auth-zhipu-a", "source-zhipu-a", false, 10, 5, 0, 0, 15, nil)
+	inside14d.Provider = "zhipu"
+	inside14d.AuthProviderSnapshot = "zhipu"
+	inside14d.AccountSnapshot = "zhu***@gmail.com"
+	inside30d := monitoringEvent("inside-30d", nowMS-thirtyDaysMS+1, "glm-5v-turbo", "auth-zhipu-b", "source-zhipu-b", false, 20, 6, 0, 0, 26, nil)
+	inside30d.Provider = "zhipu"
+	inside30d.AuthProviderSnapshot = "zhipu"
+	inside30d.AccountSnapshot = "zhu***@gmail.com"
+	outside30d := monitoringEvent("outside-30d", nowMS-thirtyDaysMS-1, "glm-4", "auth-zhipu-c", "source-zhipu-c", false, 100, 100, 0, 0, 200, nil)
+	outside30d.Provider = "zhipu"
+	outside30d.AuthProviderSnapshot = "zhipu"
+	outside30d.AccountSnapshot = "zhu***@gmail.com"
+	if _, err := db.InsertEvents(ctx, []usage.Event{inside14d, inside30d, outside30d}); err != nil {
+		t.Fatalf("insert events: %v", err)
+	}
+
+	resp, err := New(db).Analytics(ctx, Request{
+		FromMS: nowMS - fourteenDaysMS,
+		ToMS:   nowMS,
+		NowMS:  nowMS,
+		Include: Include{
+			Summary:      true,
+			AccountStats: true,
+			EventsPage:   &EventsPage{Limit: 10},
+		},
+	})
+	if err != nil {
+		t.Fatalf("14d analytics: %v", err)
+	}
+	if resp.Summary == nil || resp.Summary.TotalCalls != 1 || resp.Summary.TotalTokens != 15 {
+		t.Fatalf("14d summary = %#v", resp.Summary)
+	}
+	if resp.Events == nil || len(resp.Events.Items) != 1 || resp.Events.Items[0].EventHash != "inside-14d" {
+		t.Fatalf("14d events = %#v", resp.Events)
+	}
+	if len(resp.AccountStats) != 1 || resp.AccountStats[0].AuthProviderSnapshot != "zhipu" {
+		t.Fatalf("14d account stats = %#v", resp.AccountStats)
+	}
+
+	resp, err = New(db).Analytics(ctx, Request{
+		FromMS: nowMS - thirtyDaysMS,
+		ToMS:   nowMS,
+		NowMS:  nowMS,
+		Include: Include{
+			Summary:      true,
+			AccountStats: true,
+			EventsPage:   &EventsPage{Limit: 10},
+		},
+	})
+	if err != nil {
+		t.Fatalf("30d analytics: %v", err)
+	}
+	if resp.Summary == nil || resp.Summary.TotalCalls != 2 || resp.Summary.TotalTokens != 41 {
+		t.Fatalf("30d summary = %#v", resp.Summary)
+	}
+	if resp.Events == nil || len(resp.Events.Items) != 2 {
+		t.Fatalf("30d events = %#v", resp.Events)
+	}
+	for _, item := range resp.Events.Items {
+		if item.EventHash == "outside-30d" {
+			t.Fatalf("30d window included older event: %#v", resp.Events)
+		}
+	}
+}
+
 func TestAnalyticsAccountAndAPIKeyStatsUseFullFilteredScope(t *testing.T) {
 	db := newMonitoringTestStore(t)
 	ctx := context.Background()

@@ -55,16 +55,27 @@ import {
   BATCH_BAR_HIDDEN_TRANSFORM,
   DEFAULT_COMPACT_PAGE_SIZE,
   DEFAULT_REGULAR_PAGE_SIZE,
+  authFileMatchesCodexStatusFilter,
+  buildAuthFileCodexInspectionMap,
   buildWildcardSearch,
   compareAuthFileName,
   compareAuthFileNote,
   compareAuthFilePriority,
   easePower2In,
   easePower3Out,
+  getAuthFileCodexInspectionKeyForFile,
+  getAuthFileCodexStatus,
   getAuthFilePlanSortRank,
   getAuthFileSearchValues,
+  normalizeAuthFilesCodexStatusFilter,
   stringifySearchValue,
+  type AuthFileCodexInspectionSnapshot,
+  type AuthFilesCodexStatusFilter,
 } from '@/features/authFiles/model/authFilesPageModel';
+import {
+  createCodexInspectionConnectionFingerprint,
+  loadCodexInspectionLastRun,
+} from '@/features/monitoring/codexInspection';
 import {
   normalizeAuthFilesSortMode,
   normalizeAuthFilesViewMode,
@@ -89,6 +100,8 @@ export function AuthFilesPage() {
   const { t } = useTranslation();
   const showNotification = useNotificationStore((state) => state.showNotification);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
+  const apiBase = useAuthStore((state) => state.apiBase);
+  const managementKey = useAuthStore((state) => state.managementKey);
   const resolvedTheme: ResolvedTheme = useThemeStore((state) => state.resolvedTheme);
   const codexQuota = useQuotaStore((state) => state.codexQuota);
   const pageTransitionLayer = usePageTransitionLayer();
@@ -99,6 +112,7 @@ export function AuthFilesPage() {
   const [problemOnly, setProblemOnly] = useState(false);
   const [disabledOnly, setDisabledOnly] = useState(false);
   const [healthyOnly, setHealthyOnly] = useState(false);
+  const [codexStatusFilter, setCodexStatusFilter] = useState<AuthFilesCodexStatusFilter>('all');
   const [compactMode, setCompactMode] = useState(false);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -112,6 +126,9 @@ export function AuthFilesPage() {
   const [batchActionBarVisible, setBatchActionBarVisible] = useState(false);
   const [uiStateHydrated, setUiStateHydrated] = useState(false);
   const [authJsonPasteOpen, setAuthJsonPasteOpen] = useState(false);
+  const [lastCodexInspectionResults, setLastCodexInspectionResults] = useState<
+    AuthFileCodexInspectionSnapshot[]
+  >([]);
   const floatingBatchActionsRef = useRef<HTMLDivElement>(null);
   const batchActionAnimationRef = useRef<AnimationPlaybackControlsWithThen | null>(null);
   const previousSelectionCountRef = useRef(0);
@@ -193,6 +210,10 @@ export function AuthFilesPage() {
   const disableControls = connectionStatus !== 'connected';
   const normalizedFilter = normalizeProviderKey(String(filter));
   const pageSize = compactMode ? pageSizeByMode.compact : pageSizeByMode.regular;
+  const connectionFingerprint = useMemo(
+    () => createCodexInspectionConnectionFingerprint(apiBase, managementKey),
+    [apiBase, managementKey]
+  );
 
   useEffect(() => {
     const persistedCompactMode = readPersistedAuthFilesCompactMode();
@@ -214,10 +235,13 @@ export function AuthFilesPage() {
       if (typeof persisted.healthyOnly === 'boolean') {
         setHealthyOnly(persisted.healthyOnly);
       }
-      if (
-        typeof persistedCompactMode !== 'boolean' &&
-        typeof persisted.compactMode === 'boolean'
-      ) {
+      const persistedCodexStatusFilter = normalizeAuthFilesCodexStatusFilter(
+        persisted.codexStatusFilter
+      );
+      if (persistedCodexStatusFilter) {
+        setCodexStatusFilter(persistedCodexStatusFilter);
+      }
+      if (typeof persistedCompactMode !== 'boolean' && typeof persisted.compactMode === 'boolean') {
         setCompactMode(persisted.compactMode);
       }
       if (typeof persisted.search === 'string') {
@@ -263,6 +287,7 @@ export function AuthFilesPage() {
       problemOnly,
       disabledOnly,
       healthyOnly,
+      codexStatusFilter,
       compactMode,
       search,
       page,
@@ -274,6 +299,7 @@ export function AuthFilesPage() {
     });
     writePersistedAuthFilesCompactMode(compactMode);
   }, [
+    codexStatusFilter,
     compactMode,
     disabledOnly,
     filter,
@@ -291,6 +317,14 @@ export function AuthFilesPage() {
   useEffect(() => {
     setPageSizeInput(String(pageSize));
   }, [pageSize]);
+
+  useEffect(() => {
+    if (!isCurrentLayer) return;
+    const lastRun = connectionFingerprint
+      ? loadCodexInspectionLastRun(connectionFingerprint)
+      : null;
+    setLastCodexInspectionResults(lastRun?.result.results ?? []);
+  }, [connectionFingerprint, isCurrentLayer]);
 
   const setCurrentModePageSize = useCallback(
     (next: number) => {
@@ -385,15 +419,42 @@ export function AuthFilesPage() {
     return Array.from(types);
   }, [files]);
 
+  const codexInspectionByAuthFile = useMemo(
+    () => buildAuthFileCodexInspectionMap(lastCodexInspectionResults),
+    [lastCodexInspectionResults]
+  );
+
+  const codexStatusByAuthFileKey = useMemo(() => {
+    const statusMap = new Map<string, ReturnType<typeof getAuthFileCodexStatus>>();
+    files.forEach((file) => {
+      const statusKey = getAuthFileCodexInspectionKeyForFile(file);
+      statusMap.set(
+        statusKey,
+        getAuthFileCodexStatus(
+          file,
+          codexQuota[file.name],
+          codexInspectionByAuthFile.get(statusKey)
+        )
+      );
+    });
+    return statusMap;
+  }, [codexInspectionByAuthFile, codexQuota, files]);
+
   const filesMatchingStatusFilters = useMemo(
     () =>
       files.filter((file) => {
         if (problemOnly && !hasAuthFileStatusMessage(file)) return false;
         if (disabledOnly && file.disabled !== true) return false;
         if (healthyOnly && !isHealthyAuthFile(file)) return false;
+        const codexStatus = codexStatusByAuthFileKey.get(
+          getAuthFileCodexInspectionKeyForFile(file)
+        );
+        if (codexStatus && !authFileMatchesCodexStatusFilter(codexStatus, codexStatusFilter)) {
+          return false;
+        }
         return true;
       }),
-    [disabledOnly, files, healthyOnly, problemOnly]
+    [codexStatusByAuthFileKey, codexStatusFilter, disabledOnly, files, healthyOnly, problemOnly]
   );
 
   const sortOptions = useMemo(
@@ -406,6 +467,24 @@ export function AuthFilesPage() {
       { value: 'priority-asc', label: t('auth_files.sort_priority_asc') },
       { value: 'plan-desc', label: t('auth_files.sort_plan_desc') },
       { value: 'plan-asc', label: t('auth_files.sort_plan_asc') },
+    ],
+    [t]
+  );
+
+  const codexStatusFilterOptions = useMemo(
+    () => [
+      { value: 'all', label: t('auth_files.codex_status_filter_all') },
+      { value: 'reauth', label: t('auth_files.codex_status_filter_reauth') },
+      {
+        value: 'five_hour_limited',
+        label: t('auth_files.codex_status_filter_five_hour_limited'),
+      },
+      { value: 'weekly_limited', label: t('auth_files.codex_status_filter_weekly_limited') },
+      { value: 'monthly_limited', label: t('auth_files.codex_status_filter_monthly_limited') },
+      {
+        value: 'disabled_with_reset',
+        label: t('auth_files.codex_status_filter_disabled_with_reset'),
+      },
     ],
     [t]
   );
@@ -431,17 +510,30 @@ export function AuthFilesPage() {
       const matchType = normalizedFilter === 'all' || type === normalizedFilter;
       const matchSearch =
         !normalizedSearch ||
-        stringifySearchValue(getAuthFileSearchValues(item, t, codexQuota[item.name])).some(
-          (value) => {
-            const content = value.toString();
-            return wildcardSearch
-              ? wildcardSearch.test(content)
-              : content.toLowerCase().includes(normalizedTerm);
-          }
-        );
+        stringifySearchValue(
+          getAuthFileSearchValues(
+            item,
+            t,
+            codexQuota[item.name],
+            codexStatusByAuthFileKey.get(getAuthFileCodexInspectionKeyForFile(item))
+          )
+        ).some((value) => {
+          const content = value.toString();
+          return wildcardSearch
+            ? wildcardSearch.test(content)
+            : content.toLowerCase().includes(normalizedTerm);
+        });
       return matchType && matchSearch;
     });
-  }, [codexQuota, filesMatchingStatusFilters, normalizedFilter, normalizedSearch, t, wildcardSearch]);
+  }, [
+    codexQuota,
+    codexStatusByAuthFileKey,
+    filesMatchingStatusFilters,
+    normalizedFilter,
+    normalizedSearch,
+    t,
+    wildcardSearch,
+  ]);
 
   const sorted = useMemo(() => {
     const copy = [...filtered];
@@ -456,9 +548,7 @@ export function AuthFilesPage() {
     } else if (sortMode === 'name-asc') {
       copy.sort(compareAuthFileName);
     } else if (sortMode === 'note-asc' || sortMode === 'note-desc') {
-      copy.sort((a, b) =>
-        compareAuthFileNote(a, b, sortMode === 'note-desc' ? 'desc' : 'asc')
-      );
+      copy.sort((a, b) => compareAuthFileNote(a, b, sortMode === 'note-desc' ? 'desc' : 'asc'));
     } else if (sortMode === 'priority-asc' || sortMode === 'priority-desc') {
       copy.sort((a, b) =>
         compareAuthFilePriority(a, b, sortMode === 'priority-desc' ? 'desc' : 'asc')
@@ -691,7 +781,7 @@ export function AuthFilesPage() {
   );
 
   const deleteAllButtonLabel = (() => {
-    if (disabledOnly || healthyOnly) {
+    if (disabledOnly || healthyOnly || codexStatusFilter !== 'all') {
       return t('auth_files.delete_filtered_result_button');
     }
     if (problemOnly) {
@@ -750,10 +840,12 @@ export function AuthFilesPage() {
                       problemOnly,
                       disabledOnly,
                       healthyOnly,
+                      filteredFiles: codexStatusFilter !== 'all' ? filtered : undefined,
                       onResetFilterToAll: () => setFilter('all'),
                       onResetProblemOnly: () => setProblemOnly(false),
                       onResetDisabledOnly: () => setDisabledOnly(false),
                       onResetHealthyOnly: () => setHealthyOnly(false),
+                      onResetResultFilters: () => setCodexStatusFilter('all'),
                     })
                   }
                   disabled={disableControls || loading || deletingAll}
@@ -812,6 +904,22 @@ export function AuthFilesPage() {
                     options={sortOptions}
                     onChange={handleSortModeChange}
                     ariaLabel={t('auth_files.sort_label')}
+                    fullWidth
+                  />
+                </div>
+                <div className={styles.filterItem}>
+                  <label>{t('auth_files.codex_status_filter_label')}</label>
+                  <Select
+                    className={styles.sortSelect}
+                    value={codexStatusFilter}
+                    options={codexStatusFilterOptions}
+                    onChange={(value) => {
+                      const next = normalizeAuthFilesCodexStatusFilter(value);
+                      if (!next || next === codexStatusFilter) return;
+                      setCodexStatusFilter(next);
+                      setPage(1);
+                    }}
+                    ariaLabel={t('auth_files.codex_status_filter_label')}
                     fullWidth
                   />
                 </div>
@@ -899,25 +1007,31 @@ export function AuthFilesPage() {
               <div
                 className={`${styles.fileGrid} ${pageHasInlineQuotaCards ? styles.fileGridQuotaManaged : ''} ${compactMode ? styles.fileGridCompact : ''}`}
               >
-                {pageItems.map((file) => (
-                  <AuthFileCard
-                    key={file.name}
-                    file={file}
-                    compact={compactMode}
-                    selected={selectedFiles.has(file.name)}
-                    resolvedTheme={resolvedTheme}
-                    disableControls={disableControls}
-                    deleting={deleting}
-                    statusUpdating={statusUpdating}
-                    statusBarCache={statusBarCache}
-                    onShowModels={showModels}
-                    onDownload={handleDownload}
-                    onOpenPrefixProxyEditor={openPrefixProxyEditor}
-                    onDelete={handleDelete}
-                    onToggleStatus={handleStatusToggle}
-                    onToggleSelect={toggleSelect}
-                  />
-                ))}
+                {pageItems.map((file) => {
+                  const authFileKey = getAuthFileCodexInspectionKeyForFile(file);
+                  return (
+                    <AuthFileCard
+                      key={authFileKey}
+                      file={file}
+                      compact={compactMode}
+                      selected={selectedFiles.has(file.name)}
+                      resolvedTheme={resolvedTheme}
+                      disableControls={disableControls}
+                      deleting={deleting}
+                      statusUpdating={statusUpdating}
+                      statusBarCache={statusBarCache}
+                      codexStatusBadges={
+                        codexStatusByAuthFileKey.get(authFileKey)?.badges ?? []
+                      }
+                      onShowModels={showModels}
+                      onDownload={handleDownload}
+                      onOpenPrefixProxyEditor={openPrefixProxyEditor}
+                      onDelete={handleDelete}
+                      onToggleStatus={handleStatusToggle}
+                      onToggleSelect={toggleSelect}
+                    />
+                  );
+                })}
               </div>
             )}
 

@@ -9,9 +9,9 @@ const { mocks } = vi.hoisted(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
     true;
   return {
-      mocks: {
-        connectionStatus: 'connected' as 'connected' | 'disconnected',
-        list: vi.fn(),
+    mocks: {
+      connectionStatus: 'connected' as 'connected' | 'disconnected',
+      list: vi.fn(),
       saveJsonObject: vi.fn(),
       showNotification: vi.fn(),
       showConfirmation: vi.fn(),
@@ -31,6 +31,20 @@ const { mocks } = vi.hoisted(() => {
       closePrefixProxyEditor: vi.fn(),
       handlePrefixProxyChange: vi.fn(),
       handlePrefixProxySave: vi.fn(async () => undefined),
+      lastCodexInspectionLastRun: null as
+        | {
+            result: {
+              results: Array<{
+                fileName: string;
+                authIndex?: string | number | null;
+                statusCode?: number | null;
+                action?: string | null;
+                usedPercent?: number | null;
+                isQuota?: boolean | null;
+              }>;
+            };
+          }
+        | null,
       t: (key: string, options?: Record<string, unknown>) => {
         if (options && typeof options.name === 'string') {
           return `${key}:${options.name}`;
@@ -42,6 +56,7 @@ const { mocks } = vi.hoisted(() => {
 });
 
 vi.mock('react-i18next', () => ({
+  initReactI18next: { type: '3rdParty', init: () => {} },
   useTranslation: () => ({
     t: mocks.t,
   }),
@@ -86,11 +101,16 @@ vi.mock('@/stores', () => ({
     };
     return selector ? selector(state) : state;
   },
-    useAuthStore: (selector: (state: { connectionStatus: 'connected' | 'disconnected' }) => unknown) =>
-      selector({ connectionStatus: mocks.connectionStatus }),
+  useAuthStore: (selector: (state: { connectionStatus: 'connected' | 'disconnected'; apiBase: string; managementKey: string }) => unknown) =>
+    selector({
+      connectionStatus: mocks.connectionStatus,
+      apiBase: 'http://manager.local:18317',
+      managementKey: 'test-key',
+    }),
   useThemeStore: (selector: (state: { resolvedTheme: 'dark' }) => unknown) =>
     selector({ resolvedTheme: 'dark' }),
-  useQuotaStore: (selector: (state: { codexQuota: null }) => unknown) => selector({ codexQuota: null }),
+  useQuotaStore: (selector: (state: { codexQuota: Record<string, never> }) => unknown) =>
+    selector({ codexQuota: {} }),
 }));
 
 vi.mock('@/features/authFiles/hooks/useAuthFilesOauth', () => ({
@@ -141,6 +161,11 @@ vi.mock('@/features/authFiles/hooks/useAuthFilesStatusBarCache', () => ({
   useAuthFilesStatusBarCache: () => new Map(),
 }));
 
+vi.mock('@/features/monitoring/codexInspection', () => ({
+  createCodexInspectionConnectionFingerprint: () => 'test-fingerprint',
+  loadCodexInspectionLastRun: () => mocks.lastCodexInspectionLastRun,
+}));
+
 vi.mock('@/features/authFiles/uiState', () => ({
   normalizeAuthFilesSortMode: (value: string) => (value === 'default' ? 'default' : null),
   normalizeAuthFilesViewMode: (value: string) =>
@@ -152,7 +177,19 @@ vi.mock('@/features/authFiles/uiState', () => ({
 }));
 
 vi.mock('@/features/authFiles/components/AuthFileCard', () => ({
-  AuthFileCard: () => null,
+  AuthFileCard: (props: {
+    file: { name: string; authIndex?: unknown; auth_index?: unknown };
+    codexStatusBadges?: Array<{ kind: string }>;
+  }) => {
+    const authIndex = props.file.authIndex ?? props.file.auth_index ?? '-';
+    const key = `${props.file.name}::${String(authIndex)}`;
+    return (
+      <div
+        data-auth-card={key}
+        data-codex-badges={props.codexStatusBadges?.map((badge) => badge.kind).join(',') ?? ''}
+      />
+    );
+  },
 }));
 
 vi.mock('@/features/authFiles/components/AuthFileModelsModal', () => ({
@@ -201,16 +238,90 @@ describe('AuthFilesPage real auth JSON paste flow', () => {
   beforeEach(() => {
     mocks.list.mockReset();
     mocks.saveJsonObject.mockReset();
-      mocks.showNotification.mockReset();
-      mocks.showConfirmation.mockReset();
-      mocks.loadExcluded.mockReset();
-      mocks.loadModelAlias.mockReset();
-      mocks.connectionStatus = 'connected';
+    mocks.showNotification.mockReset();
+    mocks.showConfirmation.mockReset();
+    mocks.loadExcluded.mockReset();
+    mocks.loadModelAlias.mockReset();
+    mocks.connectionStatus = 'connected';
+    mocks.lastCodexInspectionLastRun = null;
 
     mocks.list.mockResolvedValue({ files: [] });
     mocks.saveJsonObject.mockResolvedValue(undefined);
     mocks.loadExcluded.mockResolvedValue(undefined);
     mocks.loadModelAlias.mockResolvedValue(undefined);
+  });
+
+  it('keeps Codex inspection status scoped to auth index for rows from the same file', async () => {
+    mocks.list.mockResolvedValue({
+      files: [
+        { name: 'shared-codex.json', type: 'codex', authIndex: 0 },
+        { name: 'shared-codex.json', type: 'codex', authIndex: 1 },
+      ],
+    });
+    mocks.lastCodexInspectionLastRun = {
+      result: {
+        results: [
+          {
+            fileName: 'shared-codex.json',
+            authIndex: 0,
+            statusCode: 401,
+            action: 'reauth',
+            usedPercent: null,
+            isQuota: false,
+          },
+          {
+            fileName: 'shared-codex.json',
+            authIndex: 1,
+            statusCode: 200,
+            action: 'keep',
+            usedPercent: null,
+            isQuota: false,
+          },
+        ],
+      },
+    };
+
+    let renderer: ReactTestRenderer;
+    await act(async () => {
+      renderer = create(<AuthFilesPage />);
+    });
+
+    await vi.waitFor(() => {
+      expect(renderer!.root.findAllByProps({ 'data-auth-card': 'shared-codex.json::0' })).toHaveLength(1);
+      expect(renderer!.root.findAllByProps({ 'data-auth-card': 'shared-codex.json::1' })).toHaveLength(1);
+    });
+
+    expect(
+      renderer!.root.findByProps({ 'data-auth-card': 'shared-codex.json::0' }).props[
+        'data-codex-badges'
+      ]
+    ).toContain('reauth');
+    expect(
+      renderer!.root.findByProps({ 'data-auth-card': 'shared-codex.json::1' }).props[
+        'data-codex-badges'
+      ]
+    ).not.toContain('reauth');
+
+    const statusSelect = renderer!.root
+      .findAllByType(Select)
+      .find((node) => node.props.ariaLabel === 'auth_files.codex_status_filter_label');
+    if (!statusSelect) throw new Error('Codex status filter select not found');
+    act(() => {
+      statusSelect.props.onChange('reauth');
+    });
+
+    await vi.waitFor(() => {
+      const renderedCards = renderer!.root.findAll(
+        (node) => typeof node.props['data-auth-card'] === 'string'
+      );
+      expect(renderedCards.map((node) => node.props['data-auth-card'])).toEqual([
+        'shared-codex.json::0',
+      ]);
+    });
+
+    await act(async () => {
+      renderer!.unmount();
+    });
   });
 
   it('submits default session paste through modal and uploads converted codex payload', async () => {

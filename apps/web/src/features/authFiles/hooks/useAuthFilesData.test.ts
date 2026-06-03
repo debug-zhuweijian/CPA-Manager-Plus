@@ -7,6 +7,7 @@ const { mocks } = vi.hoisted(() => {
     mocks: {
       list: vi.fn(),
       saveJsonObject: vi.fn(),
+      deleteFiles: vi.fn(),
       showNotification: vi.fn(),
       showConfirmation: vi.fn(),
     },
@@ -35,6 +36,7 @@ vi.mock('@/services/api', () => ({
   authFilesApi: {
     list: mocks.list,
     saveJsonObject: mocks.saveJsonObject,
+    deleteFiles: mocks.deleteFiles,
   },
 }));
 
@@ -89,11 +91,13 @@ const mountUseAuthFilesData = (): UseAuthFilesDataHarness => {
 beforeEach(() => {
   mocks.list.mockReset();
   mocks.saveJsonObject.mockReset();
+  mocks.deleteFiles.mockReset();
   mocks.showNotification.mockReset();
   mocks.showConfirmation.mockReset();
 
   mocks.list.mockResolvedValue({ files: [] });
   mocks.saveJsonObject.mockResolvedValue(undefined);
+  mocks.deleteFiles.mockResolvedValue({ deleted: 0, failed: [], files: [] });
 });
 
 describe('buildPastedAuthJsonPayload', () => {
@@ -404,6 +408,68 @@ describe('useAuthFilesData savePastedAuthJson', () => {
     expect(mocks.list).toHaveBeenCalledTimes(1);
     expect(mocks.showNotification).toHaveBeenCalledWith(
       'auth_files.paste_success:custom-auth.json',
+      'success'
+    );
+    hook.unmount();
+  });
+});
+
+describe('useAuthFilesData handleDeleteAll', () => {
+  it('deletes only the provided filtered files for custom result filters', async () => {
+    const hook = mountUseAuthFilesData();
+    const resetResultFilters = vi.fn();
+    const resetFilterToAll = vi.fn();
+
+    mocks.list.mockResolvedValueOnce({
+      files: [
+        { name: 'codex-limited.json', type: 'codex' },
+        { name: 'codex-ok.json', type: 'codex' },
+      ],
+    });
+    mocks.deleteFiles.mockResolvedValueOnce({
+      deleted: 1,
+      failed: [],
+      files: ['codex-limited.json'],
+    });
+
+    await act(async () => {
+      await hook.getCurrent().loadFiles();
+    });
+
+    act(() => {
+      hook.getCurrent().handleDeleteAll({
+        filter: 'all',
+        problemOnly: false,
+        disabledOnly: false,
+        healthyOnly: false,
+        filteredFiles: [{ name: 'codex-limited.json', type: 'codex' }],
+        onResetFilterToAll: resetFilterToAll,
+        onResetProblemOnly: vi.fn(),
+        onResetDisabledOnly: vi.fn(),
+        onResetHealthyOnly: vi.fn(),
+        onResetResultFilters: resetResultFilters,
+      });
+    });
+
+    const confirmation = mocks.showConfirmation.mock.calls[0]?.[0] as
+      | { onConfirm?: () => Promise<void> }
+      | undefined;
+    expect(confirmation?.onConfirm).toBeTypeOf('function');
+    expect(mocks.showConfirmation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'auth_files.delete_filtered_result_confirm_file_scope',
+      })
+    );
+
+    await act(async () => {
+      await confirmation?.onConfirm?.();
+    });
+
+    expect(mocks.deleteFiles).toHaveBeenCalledWith(['codex-limited.json']);
+    expect(resetFilterToAll).not.toHaveBeenCalled();
+    expect(resetResultFilters).toHaveBeenCalledTimes(1);
+    expect(mocks.showNotification).toHaveBeenCalledWith(
+      'auth_files.delete_filtered_result_success',
       'success'
     );
     hook.unmount();

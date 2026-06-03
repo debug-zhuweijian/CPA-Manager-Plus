@@ -739,6 +739,60 @@
   overflow-x: auto;
 }
 
+.resultPaginationBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--inspect-line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--inspect-surface-muted) 62%, var(--inspect-surface));
+}
+
+.resultPaginationInfo {
+  min-width: 0;
+  color: var(--inspect-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.resultPaginationControls {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.resultPageSizeField {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  color: var(--inspect-muted);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.resultPageSizeSelect {
+  width: 118px;
+  flex: 0 0 auto;
+}
+
+.resultPageSizeSelectTrigger {
+  min-width: 96px;
+  height: 32px !important;
+  padding: 0 2px 0 10px !important;
+  border-radius: 10px !important;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .table {
   width: 100%;
   min-width: 920px;
@@ -2023,6 +2077,16 @@
   .settingsAutoCards {
     grid-template-columns: 1fr;
   }
+
+  .resultPaginationBar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .resultPaginationControls {
+    justify-content: flex-start;
+    width: 100%;
+  }
 }
 
 @container codex-inspection-page (max-width: 640px) {
@@ -2061,6 +2125,17 @@
 
   .logRow {
     grid-template-columns: 1fr;
+  }
+
+  .resultPaginationControls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .resultPageSizeField,
+  .resultPageSizeSelect,
+  .resultPageSizeSelectTrigger {
+    width: 100%;
   }
 
   .settingsField,

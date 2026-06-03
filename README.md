@@ -14,9 +14,10 @@ CPA Manager Plus is the recommended successor to CPA-Manager. It combines the CP
 
 ## Panel Preview
 
-![Home dashboard showing traffic overview, collector status, usage metrics, health alerts, and version information](img/home.jpg)
-![Monitoring center showing usage analytics, realtime request events, account overview, API key breakdowns, and model cost statistics](img/monitoring.jpg)
-![Codex account inspection showing probe progress, account status, cleanup recommendations, and execution logs](img/codex-inspection.png)
+![Dashboard overview showing Manager Server status, usage metrics, request health, token breakdowns, model costs, and collector state](img/dashboard-overview.png)
+![Request monitoring account overview showing account statistics, quota progress, token structure, model usage, and per-account costs](img/request-monitoring-account-overview.png)
+![Request monitoring realtime events showing recent calls, model, reasoning effort, request status, TPS, latency, usage, and cost](img/request-monitoring-realtime-events.png)
+![Server Codex account inspection showing scheduled runs, result pagination, account status, cleanup recommendations, and logs](img/server-codex-inspection.png)
 
 ## What This Provides
 
@@ -434,7 +435,7 @@ go run ./cmd/cpa-manager-plus
 - **CPA panel mode is missing monitoring/pricing/imports**: this is expected. These are Full Docker / Manager Server-hosted panel features.
 - **Data disappears after container rebuild**: mount `/data` to a Docker volume or host directory.
 - **Old data is missing after migrating from CPA-Manager**: verify that the Plus container is mounting the old `/data` volume, not a newly created empty `cpa-manager-plus-data` volume.
-- **Admin key is lost**: setting `CPA_MANAGER_ADMIN_KEY` does not overwrite an existing `settings.admin_credential_v1`. Follow the offline recovery steps in the migration guide after backing up `/data`.
+- **Admin key is lost**: setting `CPA_MANAGER_ADMIN_KEY` does not overwrite an existing `settings.admin_credential_v1`. Stop Manager Server, back up `/data`, and follow [Reset the Manager Server Admin Key](docs/reset-admin-key.md).
 - **Detailed FAQ**: see [FAQ and Troubleshooting](https://github.com/seakee/CPA-Manager-Plus/wiki/CPA-Manager-Plus-FAQ-and-Troubleshooting) or the [Chinese FAQ](https://github.com/seakee/CPA-Manager-Plus/wiki/CPA%E2%80%90Manager-%E5%B8%B8%E8%A7%81%E9%97%AE%E9%A2%98%E4%B8%8E%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88).
 
 ## References
@@ -442,6 +443,7 @@ go run ./cmd/cpa-manager-plus
 - CLIProxyAPI: https://github.com/router-for-me/CLIProxyAPI
 - Redis usage queue documentation: https://help.router-for.me/management/redis-usage-queue.html
 - Migration from CPA-Manager: [docs/migration-from-cpa-manager.md](docs/migration-from-cpa-manager.md)
+- Reset the Manager Server admin key: [docs/reset-admin-key.md](docs/reset-admin-key.md)
 - Release checklist: [docs/release-checklist.md](docs/release-checklist.md)
 
 ## Acknowledgements

@@ -627,6 +627,68 @@ func TestAnalyticsNormalizesGenericAPIKeyProviderFromModel(t *testing.T) {
 	}
 }
 
+func TestAnalyticsUsesModelProviderAndSourceScopedAccountRows(t *testing.T) {
+	db := newMonitoringTestStore(t)
+	ctx := context.Background()
+	fromMS := int64(1_778_260_000_000)
+	toMS := fromMS + 60*60*1000
+
+	first := monitoringEvent("legacy-zhipu-a", fromMS+1_000, "glm-5.1", "auth-a", "source-a", false, 10, 5, 0, 0, 15, nil)
+	first.Provider = "zhipu"
+	first.AuthProviderSnapshot = "claude"
+	first.AccountSnapshot = "zhu***@gmail.com"
+	first.AuthLabelSnapshot = "zhu***@gmail.com"
+	first.Source = "zhu***@gmail.com"
+	second := monitoringEvent("legacy-zhipu-b", fromMS+2_000, "glm-5v-turbo", "auth-b", "source-b", false, 20, 6, 0, 0, 26, nil)
+	second.Provider = "zhipu"
+	second.AuthProviderSnapshot = "claude"
+	second.AccountSnapshot = "zhu***@gmail.com"
+	second.AuthLabelSnapshot = "zhu***@gmail.com"
+	second.Source = "zhu***@gmail.com"
+	if _, err := db.InsertEvents(ctx, []usage.Event{first, second}); err != nil {
+		t.Fatalf("insert events: %v", err)
+	}
+
+	resp, err := New(db).Analytics(ctx, Request{
+		FromMS: fromMS,
+		ToMS:   toMS,
+		Include: Include{
+			AccountStats: true,
+			EventsPage:   &EventsPage{Limit: 10},
+		},
+	})
+	if err != nil {
+		t.Fatalf("analytics: %v", err)
+	}
+	if len(resp.AccountStats) != 2 {
+		t.Fatalf("account stats should stay source-scoped, got %#v", resp.AccountStats)
+	}
+	seenIDs := map[string]struct{}{}
+	for _, row := range resp.AccountStats {
+		if row.AuthProviderSnapshot != "zhipu" {
+			t.Fatalf("account provider = %q, want zhipu in %#v", row.AuthProviderSnapshot, row)
+		}
+		if row.AccountSnapshot != "zhu***@gmail.com" {
+			t.Fatalf("account snapshot = %q", row.AccountSnapshot)
+		}
+		if len(row.SourceHashes) != 1 {
+			t.Fatalf("source hashes = %#v", row.SourceHashes)
+		}
+		seenIDs[row.ID] = struct{}{}
+	}
+	if len(seenIDs) != 2 {
+		t.Fatalf("account ids should differ by source hash, got %#v", resp.AccountStats)
+	}
+	if resp.Events == nil || len(resp.Events.Items) != 2 {
+		t.Fatalf("events = %#v", resp.Events)
+	}
+	for _, item := range resp.Events.Items {
+		if item.AuthProviderSnapshot != "zhipu" {
+			t.Fatalf("event provider = %q, want zhipu in %#v", item.AuthProviderSnapshot, item)
+		}
+	}
+}
+
 func TestAnalyticsFilterOptionsIgnoreActiveScopeFilters(t *testing.T) {
 	db := newMonitoringTestStore(t)
 	ctx := context.Background()

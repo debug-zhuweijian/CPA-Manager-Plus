@@ -842,7 +842,7 @@ func buildAccountStats(stats []store.AccountModelStat, prices map[string]store.M
 			stat.Model,
 			stat.BillingModel,
 		)
-		id := accountGroupKey(stat.AccountSnapshot, stat.AuthLabelSnapshot, stat.Source, stat.AuthIndex)
+		id := accountGroupKey(stat.AuthProviderSnapshot, stat.AccountSnapshot, stat.AuthLabelSnapshot, stat.Source, stat.SourceHash, stat.AuthIndex)
 		entry := grouped[id]
 		if entry == nil {
 			entry = &accountStatAccumulator{
@@ -1018,24 +1018,12 @@ func fillChannelShareSnapshots(row *ChannelShareRow, stat store.ChannelModelStat
 
 func effectiveProviderSnapshot(provider string, modelNames ...string) string {
 	provider = strings.TrimSpace(provider)
-	if provider != "" && !isGenericAPIKeyProvider(provider) {
-		return provider
-	}
 	for _, modelName := range modelNames {
 		if inferred := inferProviderFromModelName(modelName); inferred != "" {
 			return inferred
 		}
 	}
 	return provider
-}
-
-func isGenericAPIKeyProvider(provider string) bool {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "apikey", "api-key", "api_key":
-		return true
-	default:
-		return false
-	}
 }
 
 func inferProviderFromModelName(modelName string) string {
@@ -1070,20 +1058,27 @@ func inferProviderFromModelName(modelName string) string {
 	}
 }
 
-func accountGroupKey(accountSnapshot, authLabelSnapshot, source, authIndex string) string {
-	if strings.TrimSpace(accountSnapshot) != "" {
-		return accountSnapshot
+func accountGroupKey(provider, accountSnapshot, authLabelSnapshot, source, sourceHash, authIndex string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		provider = "-"
 	}
-	if strings.TrimSpace(authLabelSnapshot) != "" {
-		return authLabelSnapshot
-	}
-	if strings.TrimSpace(source) != "" {
-		return source
+	if strings.TrimSpace(sourceHash) != "" {
+		return provider + "::source:" + strings.TrimSpace(sourceHash)
 	}
 	if strings.TrimSpace(authIndex) != "" {
-		return authIndex
+		return provider + "::auth:" + strings.TrimSpace(authIndex)
 	}
-	return "-"
+	if strings.TrimSpace(accountSnapshot) != "" {
+		return provider + "::account:" + strings.TrimSpace(accountSnapshot)
+	}
+	if strings.TrimSpace(authLabelSnapshot) != "" {
+		return provider + "::label:" + strings.TrimSpace(authLabelSnapshot)
+	}
+	if strings.TrimSpace(source) != "" {
+		return provider + "::source-name:" + strings.TrimSpace(source)
+	}
+	return provider + "::-"
 }
 
 func apiKeyGroupKey(apiKeyHash, sourceHash, authIndex, source, provider string) string {

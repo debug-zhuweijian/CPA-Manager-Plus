@@ -24,6 +24,9 @@ export const isGenericMonitoringProviderLabel = (value: string) =>
 const firstReadable = (...values: Array<string | null | undefined>) =>
   values.find(hasReadableValue)?.trim() || '';
 
+const normalizeProvider = (value: string | null | undefined) =>
+  readString(value).trim().toLowerCase();
+
 export type MonitoringSourceDisplayInput = {
   source?: string | null;
   sourceHash?: string | null;
@@ -111,6 +114,15 @@ export const buildMonitoringSourceDisplay = (
   const explicitChannel = readString(input.channel);
   const explicitLabel = readString(input.authLabel);
   const explicitAccount = readString(input.account);
+  const snapshotProviderKey = normalizeProvider(snapshotProvider);
+  const authMetaProviderKey = normalizeProvider(authMeta?.provider);
+  const shouldUseSnapshotScopedMetadata =
+    input.preferSnapshotMetadata &&
+    snapshotProviderKey &&
+    authMetaProviderKey &&
+    snapshotProviderKey !== authMetaProviderKey;
+  const effectiveAuthMeta = shouldUseSnapshotScopedMetadata ? undefined : authMeta;
+  const effectiveChannelMeta = shouldUseSnapshotScopedMetadata ? undefined : channelMeta;
 
   const account = input.preferSnapshotMetadata
     ? firstReadable(
@@ -118,23 +130,35 @@ export const buildMonitoringSourceDisplay = (
         explicitAccount,
         snapshotLabel,
         explicitLabel,
-        authMeta?.account
+        effectiveAuthMeta?.account
       )
     : firstReadable(
-        authMeta?.account,
+        effectiveAuthMeta?.account,
         explicitAccount,
         snapshotAccount,
         explicitLabel,
         snapshotLabel
       );
   const sourceLabel = input.preferSnapshotMetadata
-    ? firstReadable(snapshotLabel, explicitLabel, account, authMeta?.label, sourceMeta.displayName)
-    : firstReadable(authMeta?.label, explicitLabel, snapshotLabel, account, sourceMeta.displayName);
+    ? firstReadable(
+        snapshotLabel,
+        explicitLabel,
+        account,
+        effectiveAuthMeta?.label,
+        sourceMeta.displayName
+      )
+    : firstReadable(
+        effectiveAuthMeta?.label,
+        explicitLabel,
+        snapshotLabel,
+        account,
+        sourceMeta.displayName
+      );
   const provider = input.preferSnapshotMetadata
-    ? firstReadable(snapshotProvider, authMeta?.provider, sourceMeta.type)
-    : firstReadable(authMeta?.provider, snapshotProvider, sourceMeta.type);
-  const channel = firstReadable(channelMeta?.name, explicitChannel, provider);
-  const channelHost = firstReadable(channelMeta?.host);
+    ? firstReadable(snapshotProvider, effectiveAuthMeta?.provider, sourceMeta.type)
+    : firstReadable(effectiveAuthMeta?.provider, snapshotProvider, sourceMeta.type);
+  const channel = firstReadable(effectiveChannelMeta?.name, explicitChannel, provider);
+  const channelHost = firstReadable(effectiveChannelMeta?.host);
   const sourceMasked = maskEmailLike(sourceLabel || sourceMeta.displayName);
   const accountMasked = maskEmailLike(account || sourceLabel);
   const fallbackId = shortHash(input.sourceHash || input.apiKeyHash || authIndex);

@@ -578,6 +578,77 @@ describe('analytics account row source display', () => {
     expect(rows[0].channels).not.toContain('Claude');
     expect(rows[0].channels).toContain('智谱');
   });
+
+  it('keeps snapshot provider when the current auth index metadata belongs to another provider', () => {
+    const authMetaMap = new Map([
+      [
+        'claude-auth',
+        {
+          authIndex: 'claude-auth',
+          label: 'Claude Account',
+          account: 'Claude Account',
+          provider: 'claude',
+          status: 'active',
+          disabled: false,
+          unavailable: false,
+          runtimeOnly: false,
+          planType: '-',
+          updatedAt: '',
+        },
+      ],
+    ]);
+    const channelByAuthIndex = new Map([
+      [
+        'claude-auth',
+        {
+          key: 'claude:0',
+          name: 'Claude',
+          baseUrl: 'https://claude.example.com',
+          host: 'claude.example.com',
+          disabled: false,
+          authIndices: ['claude-auth'],
+          modelNames: [],
+        },
+      ],
+    ]);
+    const rows = buildAccountRowsFromAnalytics(
+      [
+        {
+          id: 'zhipu::source:source-hash',
+          account_snapshot: 'm:f8a5...mjMF',
+          auth_label_snapshot: 'm:f8a5...mjMF',
+          auth_provider_snapshot: 'zhipu',
+          auth_indices: ['claude-auth'],
+          sources: ['m:f8a5...mjMF'],
+          source_hashes: ['source-hash'],
+          calls: 10,
+          success_calls: 10,
+          failure_calls: 0,
+          success_rate: 1,
+          input_tokens: 100,
+          output_tokens: 50,
+          cached_tokens: 0,
+          cache_read_tokens: 0,
+          cache_creation_tokens: 0,
+          total_tokens: 150,
+          cost: 0,
+          average_latency_ms: null,
+          last_seen_ms: 1,
+          models: [],
+        } satisfies MonitoringAnalyticsAccountStatRow,
+      ],
+      authMetaMap,
+      new Map(),
+      buildSourceInfoMap({}),
+      channelByAuthIndex
+    );
+
+    expect(rows[0].id).toBe('zhipu::source:source-hash');
+    expect(rows[0].displayAccount).toBe('m:f8a5...mjMF');
+    expect(rows[0].authLabels).not.toContain('Claude Account');
+    expect(rows[0].channels).not.toContain('Claude');
+    expect(rows[0].channels).toContain('zhipu');
+  });
 });
 
 describe('analytics failure source display', () => {

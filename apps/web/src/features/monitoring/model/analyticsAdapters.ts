@@ -223,7 +223,7 @@ const resolveProviderScopedAuthMetas = (
   const scoped = authMetas.filter(
     (meta) => normalizeFilterText(meta.provider) === normalizedProvider
   );
-  return scoped.length > 0 ? scoped : authMetas;
+  return scoped;
 };
 
 const resolveDisplayAuthIndex = (
@@ -249,13 +249,15 @@ const resolveScopedChannelNames = (
   authMetas: MonitoringAuthMeta[],
   channelByAuthIndex: Map<string, MonitoringChannelMeta>,
   providerSnapshot: string | undefined
-) =>
-  uniqueReadableValues([
+) => {
+  const normalizedProvider = normalizeFilterText(providerSnapshot);
+  return uniqueReadableValues([
     ...authMetas.map((meta) => channelByAuthIndex.get(meta.authIndex)?.name),
-    authIndex !== '-' ? channelByAuthIndex.get(authIndex)?.name : '',
+    !normalizedProvider && authIndex !== '-' ? channelByAuthIndex.get(authIndex)?.name : '',
     ...authMetas.map((meta) => meta.provider),
     providerSnapshot,
   ]);
+};
 
 const buildModelSpendRowsFromAnalytics = (
   rows: MonitoringAnalyticsAccountStatRow['models'] = []
@@ -610,7 +612,7 @@ export const buildAccountRowsFromAnalytics = (
       const channels = uniqueReadableValues([...channelNames, display.channel]);
 
       return {
-        id: account || row.id,
+        id: row.id || account,
         account,
         displayAccount,
         accountMasked: display.accountMasked || maskEmailLike(account),

@@ -614,10 +614,72 @@
   }
 
   .realtimeTable {
-    min-width: 1210px;
+    --realtime-col-source: 21%;
+    --realtime-col-model: 12%;
+    --realtime-col-effort: 7%;
+    --realtime-col-recent: 6%;
+    --realtime-col-status: 7%;
+    --realtime-col-success-rate: 7%;
+    --realtime-col-total-calls: 5%;
+    --realtime-col-tps: 5%;
+    --realtime-col-latency: 10%;
+    --realtime-col-time: 8%;
+    --realtime-col-usage: 7%;
+    --realtime-col-cost: 5%;
+
+    min-width: 1260px;
     border-collapse: separate;
     border-spacing: 0 8px;
     background: transparent;
+    table-layout: fixed;
+  }
+
+  .realtimeTable col:nth-child(1) {
+    width: var(--realtime-col-source);
+  }
+
+  .realtimeTable col:nth-child(2) {
+    width: var(--realtime-col-model);
+  }
+
+  .realtimeTable col:nth-child(3) {
+    width: var(--realtime-col-effort);
+  }
+
+  .realtimeTable col:nth-child(4) {
+    width: var(--realtime-col-recent);
+  }
+
+  .realtimeTable col:nth-child(5) {
+    width: var(--realtime-col-status);
+  }
+
+  .realtimeTable col:nth-child(6) {
+    width: var(--realtime-col-success-rate);
+  }
+
+  .realtimeTable col:nth-child(7) {
+    width: var(--realtime-col-total-calls);
+  }
+
+  .realtimeTable col:nth-child(8) {
+    width: var(--realtime-col-tps);
+  }
+
+  .realtimeTable col:nth-child(9) {
+    width: var(--realtime-col-latency);
+  }
+
+  .realtimeTable col:nth-child(10) {
+    width: var(--realtime-col-time);
+  }
+
+  .realtimeTable col:nth-child(11) {
+    width: var(--realtime-col-usage);
+  }
+
+  .realtimeTable col:nth-child(12) {
+    width: var(--realtime-col-cost);
   }
 
   .table thead th {

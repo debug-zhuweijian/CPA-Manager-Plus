@@ -1,7 +1,7 @@
 import { useId, type ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { Button } from '@/components/ui/Button';
-import { IconCopy, IconFilter } from '@/components/ui/icons';
+import { IconCopy, IconEye, IconEyeOff, IconFilter } from '@/components/ui/icons';
 import {
   PaginationControls,
   RecentPattern,
@@ -10,6 +10,7 @@ import { MonitoringPanel } from '@/features/monitoring/components/MonitoringPane
 import { formatPercent } from '@/features/monitoring/components/accountOverviewPresentation';
 import { buildRealtimeSourceDisplay } from '@/features/monitoring/realtimeSourceDisplay';
 import type { MonitoringEventRow } from '@/features/monitoring/hooks/useMonitoringData';
+import type { AccountDisplayMode } from '@/features/monitoring/accountOverviewState';
 import { useNotificationStore } from '@/stores';
 import { copyToClipboard } from '@/utils/clipboard';
 import { maskSensitiveText, truncateText } from '@/utils/format';
@@ -40,12 +41,16 @@ type RealtimeEventsPanelProps = {
   failedOnlyActive: boolean;
   eventsHasMore: boolean;
   eventsLoadingMore: boolean;
+  eventsTotalCount: number;
+  eventsLoadedCount: number;
   overallLoading: boolean;
   hasPrices: boolean;
+  accountDisplayMode: AccountDisplayMode;
   locale: string;
   emptyState: ReactNode;
   t: TFunction;
   onToggleFailedOnly: () => void;
+  onAccountDisplayModeChange: (mode: AccountDisplayMode) => void;
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
   onLoadMoreEvents: () => void;
@@ -55,8 +60,10 @@ export type RealtimeEventsPanelActionsProps = {
   rowCount: number;
   scopedFailureCount: number;
   failedOnlyActive: boolean;
+  accountDisplayMode: AccountDisplayMode;
   t: TFunction;
   onToggleFailedOnly: () => void;
+  onAccountDisplayModeChange: (mode: AccountDisplayMode) => void;
 };
 
 const REALTIME_PAGE_SIZE_OPTIONS = [10, 50, 100, 150, 300] as const;
@@ -201,13 +208,45 @@ export function RealtimeEventsPanelActions({
   rowCount,
   scopedFailureCount,
   failedOnlyActive,
+  accountDisplayMode,
   t,
   onToggleFailedOnly,
+  onAccountDisplayModeChange,
 }: RealtimeEventsPanelActionsProps) {
+  const nextAccountDisplayMode: AccountDisplayMode =
+    accountDisplayMode === 'masked' ? 'full' : 'masked';
+  const AccountDisplayIcon = accountDisplayMode === 'masked' ? IconEyeOff : IconEye;
+  const accountDisplayHint = t(
+    accountDisplayMode === 'masked'
+      ? 'monitoring.account_overview_show_full_accounts_hint'
+      : 'monitoring.account_overview_show_masked_accounts_hint'
+  );
+
   return (
     <div className={`${styles.inlineMetrics} ${styles.realtimeHeaderActions}`}>
       <span>{`${t('monitoring.log_rows')}: ${rowCount}`}</span>
       <span>{`${t('monitoring.recent_failures')}: ${scopedFailureCount}`}</span>
+      <button
+        type="button"
+        className={[
+          styles.accountOverviewToolButton,
+          accountDisplayMode === 'full' ? styles.accountDisplayModeButtonActive : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+        onClick={() => onAccountDisplayModeChange(nextAccountDisplayMode)}
+        title={accountDisplayHint}
+        aria-label={accountDisplayHint}
+      >
+        <AccountDisplayIcon size={15} aria-hidden="true" />
+        <span>
+          {t(
+            accountDisplayMode === 'masked'
+              ? 'monitoring.account_overview_account_display_masked'
+              : 'monitoring.account_overview_account_display_full'
+          )}
+        </span>
+      </button>
       <button
         type="button"
         className={[styles.filterToggleChip, failedOnlyActive ? styles.filterToggleChipActive : '']
@@ -231,12 +270,16 @@ export function RealtimeEventsPanel({
   failedOnlyActive,
   eventsHasMore,
   eventsLoadingMore,
+  eventsTotalCount,
+  eventsLoadedCount,
   overallLoading,
   hasPrices,
+  accountDisplayMode,
   locale,
   emptyState,
   t,
   onToggleFailedOnly,
+  onAccountDisplayModeChange,
   onPageChange,
   onPageSizeChange,
   onLoadMoreEvents,
@@ -255,14 +298,30 @@ export function RealtimeEventsPanel({
       rowCount={rows.length}
       scopedFailureCount={scopedFailureCount}
       failedOnlyActive={failedOnlyActive}
+      accountDisplayMode={accountDisplayMode}
       t={t}
       onToggleFailedOnly={onToggleFailedOnly}
+      onAccountDisplayModeChange={onAccountDisplayModeChange}
     />
   );
   const content = (
     <>
       <div className={styles.tableWrapper}>
         <table className={`${styles.table} ${styles.realtimeTable}`}>
+          <colgroup>
+            <col />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col />
+            <col />
+          </colgroup>
           <thead>
             <tr>
               <th>{t('monitoring.column_source_api_key')}</th>
@@ -291,7 +350,7 @@ export function RealtimeEventsPanel({
           </thead>
           <tbody>
             {pagination.pageItems.map((row) => {
-              const sourceDisplay = buildRealtimeSourceDisplay(row, t);
+              const sourceDisplay = buildRealtimeSourceDisplay(row, t, accountDisplayMode);
               const apiKeyDisplay = buildRealtimeApiKeyDisplay(row, t);
               const showResolvedModel =
                 row.resolvedModel &&
@@ -311,7 +370,7 @@ export function RealtimeEventsPanel({
                 <tr key={row.id} className={row.failed ? styles.logRowFailed : undefined}>
                   <td>
                     <div className={styles.logTypeCell}>
-                      <div className={styles.primaryCell}>
+                      <div className={styles.primaryCell} title={sourceDisplay.title}>
                         <span>{sourceDisplay.primary}</span>
                         {sourceDisplay.meta ? <small>{sourceDisplay.meta}</small> : null}
                         {apiKeyDisplay ? (
@@ -491,6 +550,14 @@ export function RealtimeEventsPanel({
       />
       {rows.length > 0 ? (
         <div className={styles.loadMoreEventsBar}>
+          <span className={styles.loadMoreEventsSummary}>
+            {eventsHasMore
+              ? t('monitoring.events_loaded_summary', {
+                  loaded: eventsLoadedCount,
+                  total: eventsTotalCount,
+                })
+              : t('monitoring.events_all_loaded', { total: eventsTotalCount })}
+          </span>
           {eventsHasMore ? (
             <Button
               variant="secondary"
@@ -500,9 +567,7 @@ export function RealtimeEventsPanel({
             >
               {eventsLoadingMore ? t('common.loading') : t('monitoring.load_more_events')}
             </Button>
-          ) : (
-            <span>{t('monitoring.no_more_events')}</span>
-          )}
+          ) : null}
         </div>
       ) : null}
     </>

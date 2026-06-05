@@ -50,6 +50,7 @@ type ChannelModelStat struct {
 	AuthProviderSnapshot string
 	Model                string
 	BillingModel         string
+	ServiceTier          string
 	Calls                int64
 	SuccessCalls         int64
 	FailureCalls         int64
@@ -60,6 +61,7 @@ type ChannelModelStat struct {
 	CacheCreationTokens  int64
 	TotalTokens          int64
 	AvgLatencyMS         sql.NullFloat64
+	LatencySamples       int64
 }
 
 type FailureSourceStat struct {
@@ -84,6 +86,7 @@ type AccountModelStat struct {
 	SourceHash           string
 	Model                string
 	BillingModel         string
+	ServiceTier          string
 	Calls                int64
 	SuccessCalls         int64
 	FailureCalls         int64
@@ -108,6 +111,7 @@ type APIKeyModelStat struct {
 	SourceHash           string
 	Model                string
 	BillingModel         string
+	ServiceTier          string
 	Calls                int64
 	SuccessCalls         int64
 	FailureCalls         int64
@@ -145,6 +149,7 @@ type TaskBucket struct {
 }
 
 type EventPageItem struct {
+	ID                    int64
 	EventHash             string
 	TimestampMS           int64
 	Timestamp             string
@@ -181,6 +186,7 @@ type EventPageItem struct {
 type EventsPage struct {
 	Items        []EventPageItem
 	NextBeforeMS int64
+	NextBeforeID int64
 	HasMore      bool
 }
 
@@ -229,6 +235,7 @@ func (r *repository) ModelStatsWithFilter(ctx context.Context, filter AnalyticsF
 	query := `select
 	model,
 	coalesce(nullif(resolved_model, ''), model) as billing_model,
+	coalesce(service_tier, '') as service_tier,
 	count(*) as calls,
 	sum(case when failed = 0 then 1 else 0 end) as success,
 	coalesce(sum(input_tokens), 0),
@@ -239,7 +246,7 @@ func (r *repository) ModelStatsWithFilter(ctx context.Context, filter AnalyticsF
 	coalesce(sum(cache_creation_tokens), 0),
 	coalesce(sum(total_tokens), 0)
 from usage_events ` + where + `
-group by model, billing_model
+group by model, billing_model, coalesce(service_tier, '')
 order by calls desc`
 	if limit > 0 {
 		query = `with filtered as (
@@ -255,6 +262,7 @@ top_models as (
 select
 	f.model,
 	coalesce(nullif(f.resolved_model, ''), f.model) as billing_model,
+	coalesce(f.service_tier, '') as service_tier,
 	count(*) as calls,
 	sum(case when f.failed = 0 then 1 else 0 end) as success,
 	coalesce(sum(f.input_tokens), 0),
@@ -266,7 +274,7 @@ select
 	coalesce(sum(f.total_tokens), 0)
 from filtered f
 join top_models t on t.model = f.model
-group by f.model, billing_model
+group by f.model, billing_model, coalesce(f.service_tier, '')
 order by max(t.model_calls) desc, f.model, calls desc`
 		args = append(args, limit)
 	}
@@ -282,6 +290,7 @@ order by max(t.model_calls) desc, f.model, calls desc`
 		if err := rows.Scan(
 			&stat.Model,
 			&stat.BillingModel,
+			&stat.ServiceTier,
 			&stat.Calls,
 			&stat.SuccessCalls,
 			&stat.InputTokens,
@@ -366,6 +375,7 @@ func (r *repository) ChannelModelStatsWithFilter(ctx context.Context, filter Ana
 	coalesce(nullif(max(auth_provider_snapshot), ''), max(provider), ''),
 	model,
 	coalesce(nullif(resolved_model, ''), model) as billing_model,
+	coalesce(service_tier, '') as service_tier,
 	count(*),
 	sum(case when failed = 0 then 1 else 0 end),
 	sum(case when failed = 1 then 1 else 0 end),
@@ -375,9 +385,10 @@ func (r *repository) ChannelModelStatsWithFilter(ctx context.Context, filter Ana
 	coalesce(sum(cache_read_tokens), 0),
 	coalesce(sum(cache_creation_tokens), 0),
 	coalesce(sum(total_tokens), 0),
-	avg(nullif(latency_ms, 0))
+	avg(nullif(latency_ms, 0)),
+	count(nullif(latency_ms, 0))
 from usage_events `+where+`
-group by auth_index, model, billing_model
+group by auth_index, model, billing_model, coalesce(service_tier, '')
 order by count(*) desc`, args...)
 	if err != nil {
 		return nil, err
@@ -395,6 +406,7 @@ order by count(*) desc`, args...)
 			&stat.AuthProviderSnapshot,
 			&stat.Model,
 			&stat.BillingModel,
+			&stat.ServiceTier,
 			&stat.Calls,
 			&stat.SuccessCalls,
 			&stat.FailureCalls,
@@ -405,6 +417,7 @@ order by count(*) desc`, args...)
 			&stat.CacheCreationTokens,
 			&stat.TotalTokens,
 			&stat.AvgLatencyMS,
+			&stat.LatencySamples,
 		); err != nil {
 			return nil, err
 		}
@@ -468,6 +481,7 @@ func (r *repository) AccountModelStatsWithFilter(ctx context.Context, filter Ana
 	coalesce(source_hash, ''),
 	model,
 	coalesce(nullif(resolved_model, ''), model) as billing_model,
+	coalesce(service_tier, '') as service_tier,
 	count(*),
 	sum(case when failed = 0 then 1 else 0 end),
 	sum(case when failed = 1 then 1 else 0 end),
@@ -481,7 +495,7 @@ func (r *repository) AccountModelStatsWithFilter(ctx context.Context, filter Ana
 	avg(nullif(latency_ms, 0)),
 	count(nullif(latency_ms, 0))
 from usage_events `+where+`
-group by account_snapshot, auth_label_snapshot, coalesce(nullif(auth_provider_snapshot, ''), provider, ''), auth_index, source_hash, model, billing_model
+group by account_snapshot, auth_label_snapshot, coalesce(nullif(auth_provider_snapshot, ''), provider, ''), auth_index, source_hash, model, billing_model, coalesce(service_tier, '')
 order by max(timestamp_ms) desc, count(*) desc`, args...)
 	if err != nil {
 		return nil, err
@@ -500,6 +514,7 @@ order by max(timestamp_ms) desc, count(*) desc`, args...)
 			&stat.SourceHash,
 			&stat.Model,
 			&stat.BillingModel,
+			&stat.ServiceTier,
 			&stat.Calls,
 			&stat.SuccessCalls,
 			&stat.FailureCalls,
@@ -532,6 +547,7 @@ func (r *repository) APIKeyModelStatsWithFilter(ctx context.Context, filter Anal
 	coalesce(source_hash, ''),
 	model,
 	coalesce(nullif(resolved_model, ''), model) as billing_model,
+	coalesce(service_tier, '') as service_tier,
 	count(*),
 	sum(case when failed = 0 then 1 else 0 end),
 	sum(case when failed = 1 then 1 else 0 end),
@@ -545,7 +561,7 @@ func (r *repository) APIKeyModelStatsWithFilter(ctx context.Context, filter Anal
 	avg(nullif(latency_ms, 0)),
 	count(nullif(latency_ms, 0))
 from usage_events `+where+`
-group by api_key_hash, account_snapshot, auth_label_snapshot, coalesce(nullif(auth_provider_snapshot, ''), provider, ''), auth_index, source_hash, model, billing_model
+group by api_key_hash, account_snapshot, auth_label_snapshot, coalesce(nullif(auth_provider_snapshot, ''), provider, ''), auth_index, source_hash, model, billing_model, coalesce(service_tier, '')
 order by max(timestamp_ms) desc, count(*) desc`, args...)
 	if err != nil {
 		return nil, err
@@ -565,6 +581,7 @@ order by max(timestamp_ms) desc, count(*) desc`, args...)
 			&stat.SourceHash,
 			&stat.Model,
 			&stat.BillingModel,
+			&stat.ServiceTier,
 			&stat.Calls,
 			&stat.SuccessCalls,
 			&stat.FailureCalls,
@@ -704,17 +721,40 @@ limit ?`, args...)
 	return failures, rows.Err()
 }
 
-func (r *repository) EventsPageWithFilter(ctx context.Context, filter AnalyticsFilter, beforeMS int64, limit int) (EventsPage, error) {
+func (r *repository) EventsCountWithFilter(ctx context.Context, filter AnalyticsFilter) (int64, error) {
+	where, args := analyticsWhere(filter)
+	var total int64
+	if err := r.db.QueryRowContext(ctx, `select count(*) from usage_events `+where, args...).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func (r *repository) EventsPageWithFilter(ctx context.Context, filter AnalyticsFilter, beforeMS int64, beforeID int64, limit int) (EventsPage, error) {
 	if limit <= 0 {
 		return EventsPage{}, nil
 	}
 	queryLimit := limit + 1
-	if beforeMS > 0 && beforeMS < filter.ToMS {
-		filter.ToMS = beforeMS
-	}
 	where, args := analyticsWhere(filter)
+	// Keyset pagination cursor. The non-unique timestamp index implicitly
+	// carries the rowid (id is "integer primary key"), so ordering by
+	// (timestamp_ms desc, id desc) stays index-backed. Using the compound
+	// (timestamp_ms, id) cursor instead of only timestamp_ms guarantees that
+	// many rows sharing one timestamp_ms are never skipped across pages.
+	// beforeID <= 0 falls back to the legacy timestamp-only cursor for old
+	// clients that do not send before_id yet.
+	if beforeMS > 0 {
+		if beforeID > 0 {
+			where += " and (timestamp_ms < ? or (timestamp_ms = ? and id < ?))"
+			args = append(args, beforeMS, beforeMS, beforeID)
+		} else {
+			where += " and timestamp_ms < ?"
+			args = append(args, beforeMS)
+		}
+	}
 	args = append(args, queryLimit)
 	rows, err := r.db.QueryContext(ctx, `select
+	id,
 	event_hash,
 	timestamp_ms,
 	timestamp,
@@ -759,6 +799,7 @@ limit ?`, args...)
 		var item EventPageItem
 		var failed int
 		if err := rows.Scan(
+			&item.ID,
 			&item.EventHash,
 			&item.TimestampMS,
 			&item.Timestamp,
@@ -805,10 +846,13 @@ limit ?`, args...)
 		items = items[:limit]
 	}
 	nextBeforeMS := int64(0)
+	nextBeforeID := int64(0)
 	if hasMore && len(items) > 0 {
-		nextBeforeMS = items[len(items)-1].TimestampMS
+		last := items[len(items)-1]
+		nextBeforeMS = last.TimestampMS
+		nextBeforeID = last.ID
 	}
-	return EventsPage{Items: items, NextBeforeMS: nextBeforeMS, HasMore: hasMore}, nil
+	return EventsPage{Items: items, NextBeforeMS: nextBeforeMS, NextBeforeID: nextBeforeID, HasMore: hasMore}, nil
 }
 
 func (r *repository) ActiveDaysWithFilter(ctx context.Context, filter AnalyticsFilter) (int64, error) {

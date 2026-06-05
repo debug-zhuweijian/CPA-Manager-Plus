@@ -1503,6 +1503,10 @@
     "account_overview_description": "按账号实时汇总当前筛选范围内的调用次数、成功失败、Token 结构和总花费，可展开查看模型明细、额度使用情况等。",
     "account_overview_view_mode_table": "表格",
     "account_overview_view_mode_card": "卡片",
+    "account_overview_account_display_masked": "脱敏",
+    "account_overview_account_display_full": "完整",
+    "account_overview_show_full_accounts_hint": "显示完整账号标识",
+    "account_overview_show_masked_accounts_hint": "显示脱敏账号标识",
     "account_overview_col_account": "账号 / Provider",
     "account_overview_col_success": "成功",
     "account_overview_col_failure": "失败",
@@ -1891,7 +1895,9 @@
     "page_size_label": "每页",
     "page_size_option": "{{count}} 条/页",
     "load_more_events": "加载更多事件",
-    "no_more_events": "没有更多事件"
+    "no_more_events": "没有更多事件",
+    "events_loaded_summary": "已加载 {{loaded}} / 共 {{total}} 条",
+    "events_all_loaded": "已加载全部 {{total}} 条"
   },
   "logs": {
     "title": "日志查看",
@@ -1900,8 +1906,8 @@
     "download_button": "下载日志",
     "error_log_button": "选择错误日志",
     "error_logs_modal_title": "错误请求日志",
-    "error_logs_description": "请选择要下载的错误请求日志文件（仅在关闭请求日志时生成）。",
-    "error_logs_request_log_enabled": "当前已开启请求日志，按接口约定错误请求日志列表会始终为空。关闭请求日志后再刷新即可查看。",
+    "error_logs_description": "这里展示 CPA 侧记录的请求错误日志，通常用于排查 4xx/5xx、认证失败、限额、上游异常等问题。请选择文件下载后查看具体原因。",
+    "error_logs_request_log_enabled": "当前已开启请求日志，按 CPA 接口约定错误请求日志列表会始终为空。如需查看独立错误日志文件，请关闭请求日志后刷新。",
     "error_logs_empty": "暂无错误请求日志文件",
     "error_logs_load_error": "加载错误日志列表失败",
     "error_logs_size": "大小",

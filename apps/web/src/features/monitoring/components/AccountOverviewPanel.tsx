@@ -7,6 +7,8 @@ import {
   IconChevronDown,
   IconChevronUp,
   IconCrosshair,
+  IconEye,
+  IconEyeOff,
   IconInfo,
   IconMoreVertical,
   IconRefreshCw,
@@ -28,6 +30,7 @@ import {
 } from '@/features/monitoring/components/accountOverviewPresentation';
 import { MonitoringPanel } from '@/features/monitoring/components/MonitoringPanel';
 import {
+  type AccountDisplayMode,
   type AccountSortKey,
   type AccountSortState,
   type MonitoringAccountAuthState,
@@ -54,6 +57,7 @@ type PaginationState<T> = {
 type AccountOverviewPanelProps = {
   embedded?: boolean;
   mode: MonitoringAccountOverviewMode;
+  accountDisplayMode: AccountDisplayMode;
   searchInput: string;
   columns: AccountOverviewColumn[];
   rows: MonitoringAccountRow[];
@@ -79,6 +83,7 @@ type AccountOverviewPanelProps = {
   onRefreshAll: () => void | Promise<void>;
   onAccountSortKeyChange: (key: AccountSortKey) => void;
   onModeChange: (mode: MonitoringAccountOverviewMode) => void;
+  onAccountDisplayModeChange: (mode: AccountDisplayMode) => void;
   onAccountSort: (sortKey: AccountSortKey) => void;
   onAccountStatusToggle: (row: MonitoringAccountRow, enabled: boolean) => void | Promise<void>;
   onLoadAccountQuota: (account: string, force: boolean) => void | Promise<void>;
@@ -91,6 +96,7 @@ type AccountOverviewPanelProps = {
 export type AccountOverviewPanelActionsProps = Pick<
   AccountOverviewPanelProps,
   | 'mode'
+  | 'accountDisplayMode'
   | 'searchInput'
   | 'accountSort'
   | 'accountSortOptions'
@@ -100,6 +106,7 @@ export type AccountOverviewPanelActionsProps = Pick<
   | 'onRefreshAll'
   | 'onAccountSortKeyChange'
   | 'onModeChange'
+  | 'onAccountDisplayModeChange'
 >;
 
 const EMPTY_ACCOUNT_AUTH_STATE: MonitoringAccountAuthState = {
@@ -141,6 +148,7 @@ function AccountColumnLabel({
 
 export function AccountOverviewPanelActions({
   mode,
+  accountDisplayMode,
   searchInput,
   accountSort,
   accountSortOptions,
@@ -150,7 +158,17 @@ export function AccountOverviewPanelActions({
   onRefreshAll,
   onAccountSortKeyChange,
   onModeChange,
+  onAccountDisplayModeChange,
 }: AccountOverviewPanelActionsProps) {
+  const nextAccountDisplayMode: AccountDisplayMode =
+    accountDisplayMode === 'masked' ? 'full' : 'masked';
+  const AccountDisplayIcon = accountDisplayMode === 'masked' ? IconEyeOff : IconEye;
+  const accountDisplayHint = t(
+    accountDisplayMode === 'masked'
+      ? 'monitoring.account_overview_show_full_accounts_hint'
+      : 'monitoring.account_overview_show_masked_accounts_hint'
+  );
+
   return (
     <div className={styles.accountOverviewHeaderActions}>
       <div className={styles.accountOverviewToolbarRow}>
@@ -175,6 +193,27 @@ export function AccountOverviewPanelActions({
             className={overallLoading ? styles.refreshIconSpinning : styles.refreshIcon}
           />
           <span>{t('common.refresh')}</span>
+        </button>
+        <button
+          type="button"
+          className={[
+            styles.accountOverviewToolButton,
+            accountDisplayMode === 'full' ? styles.accountDisplayModeButtonActive : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
+          onClick={() => onAccountDisplayModeChange(nextAccountDisplayMode)}
+          title={accountDisplayHint}
+          aria-label={accountDisplayHint}
+        >
+          <AccountDisplayIcon size={15} aria-hidden="true" />
+          <span>
+            {t(
+              accountDisplayMode === 'masked'
+                ? 'monitoring.account_overview_account_display_masked'
+                : 'monitoring.account_overview_account_display_full'
+            )}
+          </span>
         </button>
         <div className={styles.accountOverviewSortBar}>
           <Select
@@ -212,6 +251,7 @@ export function AccountOverviewPanelActions({
 export function AccountOverviewPanel({
   embedded = false,
   mode,
+  accountDisplayMode,
   searchInput,
   columns,
   rows,
@@ -237,6 +277,7 @@ export function AccountOverviewPanel({
   onRefreshAll,
   onAccountSortKeyChange,
   onModeChange,
+  onAccountDisplayModeChange,
   onAccountSort,
   onAccountStatusToggle,
   onLoadAccountQuota,
@@ -248,6 +289,7 @@ export function AccountOverviewPanel({
   const actions = (
     <AccountOverviewPanelActions
       mode={mode}
+      accountDisplayMode={accountDisplayMode}
       searchInput={searchInput}
       accountSort={accountSort}
       accountSortOptions={accountSortOptions}
@@ -257,6 +299,7 @@ export function AccountOverviewPanel({
       onRefreshAll={onRefreshAll}
       onAccountSortKeyChange={onAccountSortKeyChange}
       onModeChange={onModeChange}
+      onAccountDisplayModeChange={onAccountDisplayModeChange}
     />
   );
 
@@ -384,6 +427,7 @@ export function AccountOverviewPanel({
                           row={row}
                           expanded={isExpanded}
                           onToggle={() => onToggleExpanded(row.id, row.account)}
+                          accountDisplayMode={accountDisplayMode}
                           statusTone={statusTone}
                         />
                       </td>
@@ -466,6 +510,7 @@ export function AccountOverviewPanel({
                 hasPrices={hasPrices}
                 locale={locale}
                 t={t}
+                accountDisplayMode={accountDisplayMode}
                 isExpanded={Boolean(expandedAccounts[row.id])}
                 isFocused={focusedAccount === row.account}
                 statusData={accountStatusDataByRowId.get(row.id) ?? emptyAccountStatusData}

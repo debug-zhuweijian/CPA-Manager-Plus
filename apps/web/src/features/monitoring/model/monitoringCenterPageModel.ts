@@ -14,7 +14,11 @@ import type {
   MonitoringEventRow,
   MonitoringSummary,
 } from '@/features/monitoring/hooks/useMonitoringData';
-import type { AccountSortKey } from '@/features/monitoring/accountOverviewState';
+import {
+  resolveAccountDisplayText,
+  type AccountDisplayMode,
+  type AccountSortKey,
+} from '@/features/monitoring/accountOverviewState';
 import type {
   AccountQuotaEntry,
   AccountQuotaWindow,
@@ -155,14 +159,18 @@ export const buildProviderOptionsFromValues = (
 export const buildAccountOptions = (
   rows: MonitoringAccountRow[],
   selectedAccount: string,
-  t: TFunction
+  t: TFunction,
+  accountDisplayMode: AccountDisplayMode = 'masked'
 ) =>
   ensureSelectedOption(
     [
       { value: 'all', label: t('monitoring.filter_all_accounts') },
       ...Array.from(
         new Map(
-          rows.map((row) => [row.filterValue || row.account, buildAccountOptionLabel(row)])
+          rows.map((row) => [
+            row.filterValue || row.account,
+            buildAccountOptionLabel(row, accountDisplayMode),
+          ])
         ).entries()
       )
         .sort((left, right) => left[1].localeCompare(right[1]))
@@ -484,11 +492,15 @@ export const parsePriceValue = (value: string) => {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 };
 
-export const buildAccountOptionLabel = (row: MonitoringAccountRow) => {
-  if (!row.displayAccount || row.displayAccount === row.account) {
-    return row.account;
+export const buildAccountOptionLabel = (
+  row: MonitoringAccountRow,
+  accountDisplayMode: AccountDisplayMode = 'masked'
+) => {
+  const display = resolveAccountDisplayText(row, accountDisplayMode);
+  if (!display.secondary || display.secondary === display.primary) {
+    return display.primary;
   }
-  return `${row.displayAccount} / ${row.account}`;
+  return `${display.primary} / ${display.secondary}`;
 };
 
 const clampRemainingPercent = (value: number | null | undefined): number | null =>

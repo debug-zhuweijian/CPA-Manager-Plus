@@ -1528,6 +1528,10 @@
     "account_overview_description": "依帳號即時彙總目前篩選範圍內的呼叫次數、成功失敗、Token 結構與總花費，可展開查看模型明細、額度使用情況等。",
     "account_overview_view_mode_table": "表格",
     "account_overview_view_mode_card": "卡片",
+    "account_overview_account_display_masked": "脫敏",
+    "account_overview_account_display_full": "完整",
+    "account_overview_show_full_accounts_hint": "顯示完整帳號標識",
+    "account_overview_show_masked_accounts_hint": "顯示脫敏帳號標識",
     "account_overview_col_account": "帳號 / Provider",
     "account_overview_col_success": "成功",
     "account_overview_col_failure": "失敗",
@@ -1916,7 +1920,9 @@
     "page_size_label": "每頁",
     "page_size_option": "{{count}} 行/頁",
     "load_more_events": "載入更多事件",
-    "no_more_events": "沒有更多事件"
+    "no_more_events": "沒有更多事件",
+    "events_loaded_summary": "已載入 {{loaded}} / 共 {{total}} 筆",
+    "events_all_loaded": "已載入全部 {{total}} 筆"
   },
   "logs": {
     "title": "記錄檢視",
@@ -1925,8 +1931,8 @@
     "download_button": "下載記錄",
     "error_log_button": "選擇錯誤記錄",
     "error_logs_modal_title": "錯誤請求記錄",
-    "error_logs_description": "請選擇要下載的錯誤請求記錄檔案（僅在關閉請求記錄時產生）。",
-    "error_logs_request_log_enabled": "目前已開啟請求記錄，按介面約定錯誤請求記錄清單會始終為空。關閉請求記錄後再重新整理即可查看。",
+    "error_logs_description": "這裡展示 CPA 側記錄的請求錯誤記錄，通常用於排查 4xx/5xx、認證失敗、限額、上游異常等問題。請選擇檔案下載後查看具體原因。",
+    "error_logs_request_log_enabled": "目前已開啟請求記錄，按 CPA 介面約定錯誤請求記錄清單會始終為空。如需查看獨立錯誤記錄檔案，請關閉請求記錄後重新整理。",
     "error_logs_empty": "暫無錯誤請求記錄檔案",
     "error_logs_load_error": "載入錯誤記錄清單失敗",
     "error_logs_size": "大小",

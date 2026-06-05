@@ -7,6 +7,7 @@ import type {
 } from './hooks/useMonitoringData';
 
 export type MonitoringAccountOverviewMode = 'table' | 'card';
+export type AccountDisplayMode = 'masked' | 'full';
 
 export type AccountSortKey =
   | 'totalCalls'
@@ -67,6 +68,7 @@ export type AccountOverviewPageResetState = {
 };
 export type MonitoringAccountOverviewUiState = {
   mode: MonitoringAccountOverviewMode;
+  accountDisplayMode: AccountDisplayMode;
   sort: AccountSortState;
   cardPagination: MonitoringAccountOverviewCardPaginationState;
 };
@@ -96,9 +98,15 @@ const ACCOUNT_SORT_KEYS = [
 ] as const;
 const ACCOUNT_SORT_KEY_SET = new Set<AccountSortKey>(ACCOUNT_SORT_KEYS);
 const ACCOUNT_SORT_DIRECTION_SET = new Set<AccountSortDirection>(['asc', 'desc']);
+const ACCOUNT_DISPLAY_MODE_SET = new Set<AccountDisplayMode>(['masked', 'full']);
 
 export const normalizeAccountOverviewMode = (value: unknown): MonitoringAccountOverviewMode =>
   value === 'card' ? 'card' : 'table';
+
+export const normalizeAccountDisplayMode = (value: unknown): AccountDisplayMode =>
+  typeof value === 'string' && ACCOUNT_DISPLAY_MODE_SET.has(value as AccountDisplayMode)
+    ? (value as AccountDisplayMode)
+    : 'masked';
 
 export const normalizeAccountSortKey = (value: unknown): AccountSortKey | null =>
   typeof value === 'string' && ACCOUNT_SORT_KEY_SET.has(value as AccountSortKey)
@@ -175,6 +183,7 @@ export const normalizeAccountOverviewUiState = (
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return {
       mode: 'table',
+      accountDisplayMode: 'masked',
       sort: DEFAULT_ACCOUNT_SORT,
       cardPagination: { ...DEFAULT_ACCOUNT_OVERVIEW_CARD_PAGINATION },
     };
@@ -183,8 +192,58 @@ export const normalizeAccountOverviewUiState = (
   const record = value as Record<string, unknown>;
   return {
     mode: normalizeAccountOverviewMode(record.mode),
+    accountDisplayMode: normalizeAccountDisplayMode(record.accountDisplayMode),
     sort: normalizeAccountSortState(record.sort),
     cardPagination: normalizeAccountOverviewCardPaginationState(record.cardPagination),
+  };
+};
+
+const hasReadableAccountValue = (value: string | null | undefined) => {
+  const trimmed = String(value || '').trim();
+  return Boolean(trimmed) && trimmed !== '-';
+};
+
+const firstReadableAccountValue = (...values: Array<string | null | undefined>) =>
+  values.find(hasReadableAccountValue)?.trim() || '';
+
+export const resolveAccountDisplayText = (
+  row: Pick<
+    MonitoringAccountRow,
+    'account' | 'accountMasked' | 'displayAccount' | 'authLabels' | 'channels'
+  >,
+  displayMode: AccountDisplayMode
+) => {
+  const fullAccount = firstReadableAccountValue(row.account, row.displayAccount);
+  const maskedAccount =
+    displayMode === 'masked'
+      ? firstReadableAccountValue(row.accountMasked, row.account, row.displayAccount)
+      : fullAccount;
+  const configuredPrimary = firstReadableAccountValue(row.displayAccount, row.account);
+  const primaryIsAccount =
+    !configuredPrimary ||
+    configuredPrimary === row.account ||
+    configuredPrimary === row.accountMasked ||
+    configuredPrimary === fullAccount;
+  const primary = primaryIsAccount
+    ? firstReadableAccountValue(maskedAccount, fullAccount, configuredPrimary, '-')
+    : configuredPrimary;
+  const secondaryCandidates = primaryIsAccount
+    ? [
+        ...row.authLabels.filter((label) => label && label !== primary && label !== fullAccount),
+        ...row.channels.filter((label) => label && label !== '-' && label !== primary),
+      ]
+    : [maskedAccount, fullAccount];
+  const secondary =
+    secondaryCandidates.find((value) => hasReadableAccountValue(value) && value !== primary) || '';
+  const titleParts = Array.from(
+    new Set([primary, fullAccount, maskedAccount, secondary].filter(hasReadableAccountValue))
+  );
+
+  return {
+    primary,
+    secondary,
+    fullAccount: fullAccount || primary,
+    title: titleParts.join(' / ') || primary,
   };
 };
 
@@ -294,6 +353,7 @@ export const readAccountOverviewUiState = (): MonitoringAccountOverviewUiState =
   if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
     return {
       mode: 'table',
+      accountDisplayMode: 'masked',
       sort: DEFAULT_ACCOUNT_SORT,
       cardPagination: { ...DEFAULT_ACCOUNT_OVERVIEW_CARD_PAGINATION },
     };
@@ -310,6 +370,7 @@ export const readAccountOverviewUiState = (): MonitoringAccountOverviewUiState =
 
   return {
     mode: readAccountOverviewMode(),
+    accountDisplayMode: 'masked',
     sort: DEFAULT_ACCOUNT_SORT,
     cardPagination: { ...DEFAULT_ACCOUNT_OVERVIEW_CARD_PAGINATION },
   };

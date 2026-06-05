@@ -11,9 +11,11 @@ import {
   shouldClampAccountOverviewPage,
   shouldResetAccountOverviewPage,
   normalizeAccountOverviewPageSize,
+  normalizeAccountDisplayMode,
   normalizeAccountOverviewMode,
   normalizeAccountOverviewUiState,
   normalizeAccountSortState,
+  resolveAccountDisplayText,
   sortAccountRows,
 } from './accountOverviewState';
 import type { AuthFileItem } from '@/types';
@@ -94,15 +96,23 @@ describe('accountOverviewState', () => {
     expect(normalizeAccountOverviewMode('card')).toBe('card');
   });
 
+  it('defaults invalid account display modes to masked', () => {
+    expect(normalizeAccountDisplayMode(undefined)).toBe('masked');
+    expect(normalizeAccountDisplayMode('visible')).toBe('masked');
+    expect(normalizeAccountDisplayMode('full')).toBe('full');
+  });
+
   it('normalizes persisted overview ui state', () => {
     expect(
       normalizeAccountOverviewUiState({
         mode: 'card',
+        accountDisplayMode: 'full',
         sort: { key: 'totalCost', direction: 'asc' },
         cardPagination: { page: 3, pageSize: 18 },
       })
     ).toEqual({
       mode: 'card',
+      accountDisplayMode: 'full',
       sort: { key: 'totalCost', direction: 'asc' },
       cardPagination: { page: 3, pageSize: 18 },
     });
@@ -115,8 +125,46 @@ describe('accountOverviewState', () => {
       })
     ).toEqual({
       mode: 'table',
+      accountDisplayMode: 'masked',
       sort: DEFAULT_ACCOUNT_SORT,
       cardPagination: { page: 1, pageSize: 12 },
+    });
+  });
+
+  it('resolves masked and full account labels with full account tooltip text', () => {
+    const row = createAccountRow({
+      account: 'very-long-account-name@example.com',
+      displayAccount: 'very-long-account-name@example.com',
+      accountMasked: 'ver***@example.com',
+    });
+
+    expect(resolveAccountDisplayText(row, 'masked')).toMatchObject({
+      primary: 'ver***@example.com',
+      fullAccount: 'very-long-account-name@example.com',
+    });
+    expect(resolveAccountDisplayText(row, 'masked').title).toContain(
+      'very-long-account-name@example.com'
+    );
+    expect(resolveAccountDisplayText(row, 'full')).toMatchObject({
+      primary: 'very-long-account-name@example.com',
+      fullAccount: 'very-long-account-name@example.com',
+    });
+  });
+
+  it('keeps channel labels primary while switching account secondary text', () => {
+    const row = createAccountRow({
+      account: 'account@example.com',
+      displayAccount: 'Primary Channel',
+      accountMasked: 'acc***@example.com',
+    });
+
+    expect(resolveAccountDisplayText(row, 'masked')).toMatchObject({
+      primary: 'Primary Channel',
+      secondary: 'acc***@example.com',
+    });
+    expect(resolveAccountDisplayText(row, 'full')).toMatchObject({
+      primary: 'Primary Channel',
+      secondary: 'account@example.com',
     });
   });
 

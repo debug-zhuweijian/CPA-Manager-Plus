@@ -15,7 +15,11 @@ import {
   IconTrendingUp,
 } from '@/components/ui/icons';
 import { sortAccountOverviewCardMetrics } from '@/features/monitoring/accountOverviewCardMetrics';
-import type { MonitoringAccountAuthState } from '@/features/monitoring/accountOverviewState';
+import {
+  resolveAccountDisplayText,
+  type AccountDisplayMode,
+  type MonitoringAccountAuthState,
+} from '@/features/monitoring/accountOverviewState';
 import type {
   MonitoringAccountModelSpendRow,
   MonitoringAccountRow,
@@ -69,17 +73,20 @@ export function AccountSummaryPrimary({
   row,
   expanded,
   onToggle,
+  accountDisplayMode,
   statusTone = 'enabled',
   showSecondary = true,
 }: {
   row: MonitoringAccountRow;
   expanded: boolean;
   onToggle: () => void;
+  accountDisplayMode: AccountDisplayMode;
   statusTone?: string;
   showSecondary?: boolean;
 }) {
+  const accountDisplay = resolveAccountDisplayText(row, accountDisplayMode);
   const secondaryText = buildAccountSecondaryText(row);
-  const accountLabel = row.displayAccount || row.account;
+  const accountSecondaryText = accountDisplay.secondary || secondaryText;
 
   return (
     <button
@@ -93,7 +100,7 @@ export function AccountSummaryPrimary({
         .join(' ')}
       onClick={onToggle}
       aria-expanded={expanded}
-      title={accountLabel}
+      title={accountDisplay.title}
     >
       <span className={styles.accountExpandGlyph} aria-hidden="true">
         {expanded ? <IconChevronUp size={15} /> : <IconChevronDown size={15} />}
@@ -105,9 +112,9 @@ export function AccountSummaryPrimary({
             .join(' ')}
           aria-hidden="true"
         />
-        <span className={styles.accountButtonLabel}>{accountLabel}</span>
+        <span className={styles.accountButtonLabel}>{accountDisplay.primary}</span>
       </span>
-      {showSecondary && secondaryText ? <small>{secondaryText}</small> : null}
+      {showSecondary && accountSecondaryText ? <small>{accountSecondaryText}</small> : null}
     </button>
   );
 }
@@ -717,6 +724,7 @@ export function AccountOverviewCard({
   hasPrices,
   locale,
   t,
+  accountDisplayMode,
   isExpanded,
   isFocused,
   statusData,
@@ -733,6 +741,7 @@ export function AccountOverviewCard({
   hasPrices: boolean;
   locale: string;
   t: TFunction;
+  accountDisplayMode: AccountDisplayMode;
   isExpanded: boolean;
   isFocused: boolean;
   statusData: StatusBarData;
@@ -749,7 +758,8 @@ export function AccountOverviewCard({
   const canToggleEnabled = authState.enabledState !== 'unavailable';
   const toggleChecked = authState.enabledState === 'enabled';
   const statusTone = getAccountStatusTone(authState);
-  const secondaryText = buildAccountSecondaryText(row);
+  const accountDisplay = resolveAccountDisplayText(row, accountDisplayMode);
+  const secondaryText = accountDisplay.secondary || buildAccountSecondaryText(row);
   const latestRequestText = new Date(row.lastSeenAt).toLocaleString(locale);
 
   return (
@@ -769,6 +779,7 @@ export function AccountOverviewCard({
             row={row}
             expanded={isExpanded}
             onToggle={onToggle}
+            accountDisplayMode={accountDisplayMode}
             statusTone={statusTone}
             showSecondary={false}
           />

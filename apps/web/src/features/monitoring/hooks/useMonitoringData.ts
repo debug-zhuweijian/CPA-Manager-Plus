@@ -101,6 +101,7 @@ const EMPTY_MONITORING_ANALYTICS_EVENT_ROWS: MonitoringAnalyticsEventRow[] = [];
 interface MonitoringEventsPageState {
   scopeKey: string;
   beforeMs: number | null;
+  beforeId: number | null;
   items: MonitoringAnalyticsEventRow[];
   hasMore: boolean;
   loadingMore: boolean;
@@ -125,6 +126,8 @@ export type MonitoringPresentationSnapshot = Pick<
   | 'filteredRows'
   | 'eventsHasMore'
   | 'eventsLoadingMore'
+  | 'eventsTotalCount'
+  | 'eventsLoadedCount'
   | 'lastRefreshedAt'
 >;
 
@@ -206,6 +209,7 @@ export const rememberSharedMonitoringPresentationSnapshotForTest = (
 const createEventsPageState = (scopeKey = ''): MonitoringEventsPageState => ({
   scopeKey,
   beforeMs: null,
+  beforeId: null,
   items: [],
   hasMore: false,
   loadingMore: false,
@@ -374,9 +378,9 @@ export function useMonitoringData({
       setError(payload.error);
       setLoading(false);
       setEventsPageState((previous) =>
-        previous.beforeMs === null && !previous.loadingMore
+        previous.beforeMs === null && previous.beforeId === null && !previous.loadingMore
           ? previous
-          : { ...previous, beforeMs: null, loadingMore: false }
+          : { ...previous, beforeMs: null, beforeId: null, loadingMore: false }
       );
       setAnalyticsNowMs(Date.now());
     },
@@ -488,6 +492,7 @@ export function useMonitoringData({
       ? eventsPageState
       : createEventsPageState(eventsScopeKey);
   const eventsBeforeMs = activeEventsPageState.beforeMs;
+  const eventsBeforeId = activeEventsPageState.beforeId;
   const eventItems = activeEventsPageState.items;
   const eventsHasMore = activeEventsPageState.hasMore;
   const eventsLoadingMore = activeEventsPageState.loadingMore;
@@ -513,7 +518,11 @@ export function useMonitoringData({
       filter_options: true,
       task_buckets: true,
       recent_failures: 8,
-      events_page: { limit: MONITORING_EVENTS_PAGE_LIMIT, before_ms: eventsBeforeMs },
+      events_page: {
+        limit: MONITORING_EVENTS_PAGE_LIMIT,
+        before_ms: eventsBeforeMs,
+        before_id: eventsBeforeId,
+      },
       granularity: analyticsGranularity,
     },
     throttleMs: 1_000,
@@ -538,11 +547,15 @@ export function useMonitoringData({
     ]
   );
   const displayEventsHasMore = currentAnalyticsData?.events?.has_more ?? eventsHasMore;
+  const eventsLoadedCount = displayEventItems.length;
+  const displayEventsTotalCount =
+    currentAnalyticsData?.events?.total_count ?? eventsLoadedCount;
 
   useEffect(() => {
     const page = currentAnalyticsData?.events;
     if (!page) return;
     const requestBeforeMs = eventsBeforeMs;
+    const requestBeforeId = eventsBeforeId;
     const pageKey = buildEventsPageKey(
       eventsScopeKey,
       requestBeforeMs,
@@ -559,6 +572,7 @@ export function useMonitoringData({
         return {
           scopeKey: eventsScopeKey,
           beforeMs: requestBeforeMs,
+          beforeId: requestBeforeId,
           items: mergeMonitoringEventsPageItems(base.items, page.items, requestBeforeMs),
           hasMore: page.has_more,
           loadingMore: false,
@@ -569,7 +583,7 @@ export function useMonitoringData({
     return () => {
       cancelled = true;
     };
-  }, [currentAnalyticsData?.events, eventsScopeKey, eventsBeforeMs]);
+  }, [currentAnalyticsData?.events, eventsScopeKey, eventsBeforeMs, eventsBeforeId]);
 
   useEffect(() => {
     if (analytics.error) {
@@ -590,14 +604,16 @@ export function useMonitoringData({
     if (analytics.loading || eventsLoadingMore || !eventsHasMore) return;
     const nextBeforeMs = currentAnalyticsData?.events?.next_before_ms;
     if (!nextBeforeMs) return;
+    const nextBeforeId = currentAnalyticsData?.events?.next_before_id ?? null;
     setEventsPageState((previous) => {
       const base =
         previous.scopeKey === eventsScopeKey ? previous : createEventsPageState(eventsScopeKey);
       if (base.loadingMore) return base;
-      return { ...base, beforeMs: nextBeforeMs, loadingMore: true };
+      return { ...base, beforeMs: nextBeforeMs, beforeId: nextBeforeId, loadingMore: true };
     });
   }, [
     currentAnalyticsData?.events?.next_before_ms,
+    currentAnalyticsData?.events?.next_before_id,
     analytics.loading,
     eventsScopeKey,
     eventsHasMore,
@@ -824,6 +840,8 @@ export function useMonitoringData({
       filteredRows,
       eventsHasMore: displayEventsHasMore,
       eventsLoadingMore,
+      eventsTotalCount: displayEventsTotalCount,
+      eventsLoadedCount,
       lastRefreshedAt: analytics.lastRefreshedAt,
     }),
     [
@@ -832,6 +850,8 @@ export function useMonitoringData({
       apiKeyRows,
       channelRows,
       displayEventsHasMore,
+      displayEventsTotalCount,
+      eventsLoadedCount,
       eventsLoadingMore,
       failureSourceRows,
       filterOptions,
@@ -933,6 +953,8 @@ export function useMonitoringData({
     filteredRows: presentationSnapshot.filteredRows,
     eventsHasMore: presentationSnapshot.eventsHasMore,
     eventsLoadingMore: presentationSnapshot.eventsLoadingMore,
+    eventsTotalCount: presentationSnapshot.eventsTotalCount,
+    eventsLoadedCount: presentationSnapshot.eventsLoadedCount,
     lastRefreshedAt: presentationSnapshot.lastRefreshedAt,
     isTransitioningScope: shouldUsePresentationFallback,
     hasPresentationSnapshot: presentationResolution.hasPresentationSnapshot,

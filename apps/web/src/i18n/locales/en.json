@@ -1503,6 +1503,10 @@
     "account_overview_description": "Real-time per-account roll-up of calls, success/failure, token structure and total cost within the current filter scope. Expand a row to inspect model details and quota usage.",
     "account_overview_view_mode_table": "Table",
     "account_overview_view_mode_card": "Card",
+    "account_overview_account_display_masked": "Masked",
+    "account_overview_account_display_full": "Full",
+    "account_overview_show_full_accounts_hint": "Show full account identifiers",
+    "account_overview_show_masked_accounts_hint": "Show masked account identifiers",
     "account_overview_col_account": "Account / Provider",
     "account_overview_col_success": "Success",
     "account_overview_col_failure": "Failure",
@@ -1891,7 +1895,9 @@
     "page_size_label": "Per page",
     "page_size_option": "{{count}} / page",
     "load_more_events": "Load more events",
-    "no_more_events": "No more events"
+    "no_more_events": "No more events",
+    "events_loaded_summary": "Loaded {{loaded}} of {{total}} events",
+    "events_all_loaded": "All {{total}} events loaded"
   },
   "logs": {
     "title": "Logs Viewer",
@@ -1900,8 +1906,8 @@
     "download_button": "Download Logs",
     "error_log_button": "Select Error Log",
     "error_logs_modal_title": "Error Request Logs",
-    "error_logs_description": "Pick an error request log file to download (only generated when request logging is off).",
-    "error_logs_request_log_enabled": "Request logging is enabled, so this list will always be empty. Disable request logging and refresh to view error logs.",
+    "error_logs_description": "These are CPA-side request error logs, usually used to diagnose 4xx/5xx responses, authentication failures, rate limits, upstream errors, and similar issues. Download a file to inspect the exact cause.",
+    "error_logs_request_log_enabled": "Request logging is enabled, so CPA keeps this dedicated error log list empty by API contract. Disable request logging and refresh to view standalone error log files.",
     "error_logs_empty": "No error request log files found",
     "error_logs_load_error": "Failed to load error log list",
     "error_logs_size": "Size",

@@ -81,6 +81,7 @@ describe('MonitoringCenterPage account card', () => {
         channel: 'Claude Relay',
         channelHost: 'relay.example.com',
         provider: 'openai',
+        source: 'Team Key',
         sourceMasked: 'Team Key',
       },
       t
@@ -97,6 +98,7 @@ describe('MonitoringCenterPage account card', () => {
       authLabel: 'alice',
       channel: '-',
       channelHost: 'relay.example.com',
+      source: 'Team Key',
       sourceMasked: 'Team Key',
     };
 
@@ -125,9 +127,20 @@ describe('MonitoringCenterPage account card', () => {
           ...baseRow,
           provider: '-',
         },
-        t
+        t,
+        'full'
       ).meta
     ).toBe('alice@example.com');
+    expect(
+      buildRealtimeSourceDisplay(
+        {
+          ...baseRow,
+          provider: '-',
+        },
+        t,
+        'masked'
+      ).meta
+    ).toBe('ali***@example.com');
   });
 
   it('prefers resolved hosts over generic provider labels', () => {
@@ -139,6 +152,7 @@ describe('MonitoringCenterPage account card', () => {
         channel: 'codex',
         channelHost: 'api.freemodel.dev',
         provider: 'codex',
+        source: 'm:fe_o_raw_c68c',
         sourceMasked: 'm:fe_o...c68c',
       },
       t
@@ -146,6 +160,64 @@ describe('MonitoringCenterPage account card', () => {
 
     expect(display.primary).toBe('api.freemodel.dev');
     expect(display.meta).toBe('Provider: codex');
+  });
+
+  it('switches account labels between masked and full display with full tooltip text', () => {
+    const row = {
+      id: 'very-long-account-name@example.com',
+      account: 'very-long-account-name@example.com',
+      displayAccount: 'very-long-account-name@example.com',
+      accountMasked: 'ver***@example.com',
+      authLabels: ['alpha'],
+      authIndices: ['1'],
+      channels: ['default'],
+      totalCalls: 1,
+      successCalls: 1,
+      failureCalls: 0,
+      successRate: 1,
+      inputTokens: 1,
+      outputTokens: 1,
+      cachedTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      totalTokens: 2,
+      totalCost: 0,
+      averageLatencyMs: null,
+      lastSeenAt: Date.UTC(2026, 4, 10, 12, 0, 0),
+      recentPattern: [true],
+      models: [],
+    };
+    const renderCard = (accountDisplayMode: 'masked' | 'full') =>
+      renderToStaticMarkup(
+        <AccountOverviewCard
+          row={row}
+          authState={{
+            files: [],
+            toggleableFileNames: ['alpha.json'],
+            enabledState: 'enabled',
+          }}
+          hasPrices={false}
+          locale="en"
+          t={t}
+          accountDisplayMode={accountDisplayMode}
+          isExpanded={false}
+          isFocused={false}
+          statusData={buildEmptyMonitoringStatusData({
+            startMs: Date.UTC(2026, 4, 10, 0, 0, 0),
+            endMs: Date.UTC(2026, 4, 10, 23, 59, 59),
+          })}
+          scopeText="Scope: 5/10 12:00 AM - 11:59 PM"
+          statusUpdating={false}
+          onToggle={() => {}}
+          onFocus={() => {}}
+          onToggleEnabled={() => {}}
+          onRefreshQuota={() => {}}
+        />
+      );
+
+    expect(renderCard('masked')).toContain('>ver***@example.com</span>');
+    expect(renderCard('masked')).toContain('very-long-account-name@example.com');
+    expect(renderCard('full')).toContain('>very-long-account-name@example.com</span>');
   });
 
   it('renders bulk action buttons for mixed account auth state', () => {
@@ -183,6 +255,7 @@ describe('MonitoringCenterPage account card', () => {
         hasPrices
         locale="en"
         t={t}
+        accountDisplayMode="masked"
         isExpanded={false}
         isFocused={false}
         statusData={buildEmptyMonitoringStatusData({
@@ -269,6 +342,7 @@ describe('MonitoringCenterPage account card', () => {
         hasPrices
         locale="en"
         t={t}
+        accountDisplayMode="masked"
         isExpanded
         isFocused={false}
         statusData={buildEmptyMonitoringStatusData({
@@ -327,6 +401,7 @@ describe('MonitoringCenterPage account card', () => {
         hasPrices
         locale="en"
         t={t}
+        accountDisplayMode="masked"
         isExpanded={false}
         isFocused={false}
         statusData={buildEmptyMonitoringStatusData({

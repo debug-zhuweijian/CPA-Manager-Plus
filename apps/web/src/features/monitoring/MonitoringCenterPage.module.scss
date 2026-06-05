@@ -937,6 +937,12 @@
   color: var(--monitor-accent-strong);
 }
 
+.accountDisplayModeButtonActive {
+  border-color: color-mix(in srgb, var(--monitor-accent) 42%, var(--monitor-line-strong));
+  background: color-mix(in srgb, var(--monitor-accent) 10%, var(--monitor-surface-elevated));
+  color: var(--monitor-accent-strong);
+}
+
 .accountOverviewFilterCount {
   display: inline-flex;
   align-items: center;
@@ -1129,7 +1135,7 @@
   max-width: 100%;
 }
 
-.inlineMetrics span {
+.inlineMetrics > span {
   display: inline-flex;
   align-items: center;
   min-height: 30px;
@@ -1225,6 +1231,14 @@
 
 @include summaryTable.styles;
 @include accountOverview.styles;
+.realtimeTable .logTypeCell .primaryCell > span {
+  display: inline-block;
+  max-width: min(240px, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .realtimeTable .primaryCell small {
   white-space: normal;
   word-break: break-word;
@@ -2011,4 +2025,18 @@
   .customRangeModalGrid {
     grid-template-columns: 1fr;
   }
+}
+
+.loadMoreEventsBar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 0 4px;
+}
+
+.loadMoreEventsSummary {
+  color: var(--color-text-muted, #6b7280);
+  font-size: 13px;
 }

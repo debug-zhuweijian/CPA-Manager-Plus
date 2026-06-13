@@ -5,6 +5,17 @@ import path from 'path';
 import { execSync } from 'child_process';
 import fs from 'fs';
 
+function tryGitDescribe(command: string): string {
+  try {
+    return execSync(command, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).trim();
+  } catch {
+    return '';
+  }
+}
+
 // Get version from environment, git tag, or package.json
 function getVersion(): string {
   // 1. Environment variable (set by GitHub Actions)
@@ -13,13 +24,13 @@ function getVersion(): string {
   }
 
   // 2. Try git tag
-  try {
-    const gitTag = execSync('git describe --tags --exact-match 2>/dev/null || git describe --tags 2>/dev/null || echo ""', { encoding: 'utf8' }).trim();
-    if (gitTag) {
-      return gitTag;
-    }
-  } catch {
-    // Git not available or no tags
+  const exactGitTag = tryGitDescribe('git describe --tags --exact-match');
+  if (exactGitTag) {
+    return exactGitTag;
+  }
+  const gitTag = tryGitDescribe('git describe --tags');
+  if (gitTag) {
+    return gitTag;
   }
 
   // 3. Fall back to package.json version

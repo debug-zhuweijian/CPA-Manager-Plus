@@ -379,13 +379,37 @@ func readTokenFields(record map[string]any) (int64, int64, int64, int64, int64, 
 	if cache == 0 {
 		cache = readInt(record, "cache_tokens", "cacheTokens")
 	}
-	cacheRead := readIntFrom(tokens, "cache_read_tokens", "cacheReadTokens")
+	cacheRead := readFirstIntFrom(tokens,
+		"cache_read_tokens",
+		"cacheReadTokens",
+		"cache_read_input_tokens",
+		"cacheReadInputTokens",
+	)
 	if cacheRead == 0 {
-		cacheRead = readInt(record, "cache_read_tokens", "cacheReadTokens")
+		cacheRead = readFirstIntFrom(record,
+			"cache_read_tokens",
+			"cacheReadTokens",
+			"cache_read_input_tokens",
+			"cacheReadInputTokens",
+		)
 	}
-	cacheCreation := readIntFrom(tokens, "cache_creation_tokens", "cacheCreationTokens")
+	cacheCreation := readFirstIntFrom(tokens,
+		"cache_creation_tokens",
+		"cacheCreationTokens",
+		"cache_creation_input_tokens",
+		"cacheCreationInputTokens",
+		"cache_write_input_tokens",
+		"cacheWriteInputTokens",
+	)
 	if cacheCreation == 0 {
-		cacheCreation = readInt(record, "cache_creation_tokens", "cacheCreationTokens")
+		cacheCreation = readFirstIntFrom(record,
+			"cache_creation_tokens",
+			"cacheCreationTokens",
+			"cache_creation_input_tokens",
+			"cacheCreationInputTokens",
+			"cache_write_input_tokens",
+			"cacheWriteInputTokens",
+		)
 	}
 	total := readIntFrom(tokens, "total_tokens", "totalTokens", "total")
 	if total == 0 {
@@ -421,7 +445,25 @@ func readFailFields(record map[string]any) (int64, string) {
 	if body == "" {
 		body = readString(record, "fail_body", "failBody")
 	}
+	if headers, ok := compactJSON(first(record, "response_headers", "responseHeaders", "headers")); ok && headers != "{}" && headers != "[]" {
+		if body == "" {
+			body = headers
+		} else {
+			body = body + "\n" + headers
+		}
+	}
 	return statusCode, body
+}
+
+func compactJSON(value any) (string, bool) {
+	if value == nil {
+		return "", false
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
 }
 
 func readOptionalInt(record map[string]any, keys ...string) *int64 {
@@ -454,6 +496,16 @@ func readString(record map[string]any, keys ...string) string {
 
 func readInt(record map[string]any, keys ...string) int64 {
 	return readIntFrom(record, keys...)
+}
+
+func readFirstIntFrom(record map[string]any, keys ...string) int64 {
+	for _, key := range keys {
+		value := readIntFrom(record, key)
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func readIntFrom(record map[string]any, keys ...string) int64 {

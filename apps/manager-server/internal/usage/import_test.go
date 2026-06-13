@@ -252,10 +252,12 @@ func TestNormalizeRawReadsCPA7118UsageFields(t *testing.T) {
 		event.TotalTokens != 33 {
 		t.Fatalf("event tokens = %#v", event)
 	}
-	if !event.Failed || event.FailStatusCode != 429 || event.FailBody != "rate limit exceeded" {
+	if !event.Failed || event.FailStatusCode != 429 ||
+		!strings.Contains(event.FailBody, "rate limit exceeded") ||
+		!strings.Contains(event.FailBody, "Retry-After") {
 		t.Fatalf("event failure = %#v", event)
 	}
-	if event.FailSummary != "rate limit exceeded" {
+	if !strings.Contains(event.FailSummary, "rate limit exceeded") || !strings.Contains(event.FailSummary, "Retry-After") {
 		t.Fatalf("fail summary = %q", event.FailSummary)
 	}
 	if event.LatencyMS == nil || *event.LatencyMS != 1500 {
@@ -279,9 +281,62 @@ func TestNormalizeRawReadsCPA7118UsageFields(t *testing.T) {
 		detail.ExecutorType != "codex" || detail.Tokens.CacheReadTokens != 4 ||
 		detail.Tokens.CacheCreationTokens != 1 || detail.FailStatusCode != 429 ||
 		detail.Tokens.CachedTokens != 0 || detail.Tokens.CacheTokens != 0 ||
-		detail.FailSummary != "rate limit exceeded" || detail.TTFTMS == nil ||
+		!strings.Contains(detail.FailSummary, "rate limit exceeded") ||
+		!strings.Contains(detail.FailSummary, "Retry-After") || detail.TTFTMS == nil ||
 		*detail.TTFTMS != 450 {
 		t.Fatalf("detail = %#v", detail)
+	}
+}
+
+func TestNormalizeRawReadsAnthropicCacheUsageFields(t *testing.T) {
+	payload := `{
+	  "timestamp": "2026-04-25T00:00:00Z",
+	  "provider": "anthropic",
+	  "model": "claude-sonnet-4-5",
+	  "endpoint": "POST /v1/messages",
+	  "usage": {
+	    "input_tokens": 100,
+	    "output_tokens": 20,
+	    "cached_tokens": 34,
+	    "cache_creation_input_tokens": 11,
+	    "cache_read_input_tokens": 23
+	  }
+	}`
+	event, err := NormalizeRaw([]byte(payload))
+	if err != nil {
+		t.Fatalf("normalize anthropic payload: %v", err)
+	}
+	if event.InputTokens != 100 || event.OutputTokens != 20 ||
+		event.CachedTokens != 34 || event.CacheReadTokens != 23 ||
+		event.CacheCreationTokens != 11 || event.TotalTokens != 154 {
+		t.Fatalf("event tokens = %#v", event)
+	}
+
+	legacyPayload := BuildPayload([]Event{event})
+	detail := legacyPayload.APIs["POST /v1/messages"].Models["claude-sonnet-4-5"].Details[0]
+	if detail.Tokens.CachedTokens != 0 || detail.Tokens.CacheReadTokens != 23 ||
+		detail.Tokens.CacheCreationTokens != 11 || detail.Tokens.TotalTokens != 154 {
+		t.Fatalf("detail tokens = %#v", detail.Tokens)
+	}
+}
+
+func TestNormalizeRawReadsAnthropicCacheUsageFieldsAtTopLevel(t *testing.T) {
+	payload := `{
+	  "timestamp": "2026-04-25T00:00:00Z",
+	  "provider": "anthropic",
+	  "model": "claude-opus-4-1",
+	  "endpoint": "POST /v1/messages",
+	  "input_tokens": 10,
+	  "output_tokens": 5,
+	  "cacheReadInputTokens": 7,
+	  "cacheCreationInputTokens": 3
+	}`
+	event, err := NormalizeRaw([]byte(payload))
+	if err != nil {
+		t.Fatalf("normalize anthropic top-level payload: %v", err)
+	}
+	if event.CacheReadTokens != 7 || event.CacheCreationTokens != 3 || event.TotalTokens != 25 {
+		t.Fatalf("event tokens = %#v", event)
 	}
 }
 

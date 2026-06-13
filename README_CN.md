@@ -300,6 +300,7 @@ CPA 地址和 CPA Management Key 在首次 setup 时绑定，或通过环境变�
 | `USAGE_QUERY_LIMIT` | `50000` | 兼容 `/usage` 最多返回的近期事件数 |
 | `USAGE_CORS_ORIGINS` | `*` | CPA 控制面板方案下允许的浏览器来源 |
 | `USAGE_RESP_TLS_SKIP_VERIFY` | `false` | RESP TLS 连接是否跳过证书校验 |
+| `USAGE_QUOTA_COOLDOWN_ENABLED` | `false` | 显式启用 Codex usage-limit cooldown worker；见 [Codex usage-limit cooldown](#codex-usage-limit-cooldown) |
 | `PANEL_PATH` | 空 | 使用自定义 `management.html` 替代内置面板 |
 
 启动类配置的优先级为：环境变量 > `config.json` > 程序默认值。配置文件中的相对路径按配置文件所在目录解析。默认生成的配置文件内容如下：
@@ -312,6 +313,40 @@ CPA 地址和 CPA Management Key 在首次 setup 时绑定，或通过环境变�
 ```
 
 如果设置了 `CPA_MANAGER_ADMIN_KEY`，服务会使用该值初始化管理员凭证，不会在日志中输出生成的管理员密钥。如果设置了 `CPA_UPSTREAM_URL` 和 `CPA_MANAGEMENT_KEY`，服务启动后会自动开始采集，并作为环境变量管理的 CPA 连接配置展示在面板中。否则通过完整 Docker 初始化流程配置，保存到 SQLite `settings.manager_config_v1`；旧版 `settings.setup` 会继续写入，用于兼容已有数据和回滚。
+
+### Codex usage-limit cooldown
+
+quota cooldown worker 默认关闭。如需启用，设置环境变量：
+
+```bash
+USAGE_QUOTA_COOLDOWN_ENABLED=true
+```
+
+或在配置文件中加入等价字段：
+
+```json
+{
+  "quotaCooldownEnabled": true
+}
+```
+
+启用后，Manager Server 只会监听实际新插入的请求监控事件，并且只在严格的 Codex 短窗口 usage-limit 场景下临时禁用 CPA auth file：
+
+- provider 是 `codex`；
+- HTTP 状态码是 `429`；
+- 结构化错误类型是 `usage_limit_reached`；
+- 事件包含明确的 `resets_at` 或 `resets_in_seconds`；
+- 事件包含 auth file 快照。
+
+临时禁用会写入 `quota_cooldowns`，并带有 CPAMP ownership 元数据，例如 `owner=cpamp_usage_429`、auth file/index、账号快照、event hash、`recover_at_ms` 和禁用前状态。恢复由 SQLite 状态驱动，因此 Manager Server 重启后，只要 collector 能从当前环境变量、已保存的 Manager Server 配置或 setup 记录拿到 CPA URL 与 Management Key，到期 cooldown 仍可恢复。
+
+安全边界：
+
+- 只自动恢复 CPAMP 拥有且 `pre_disabled_state=false` 的 cooldown；
+- CPAMP 操作前已经 disabled 的 auth file 不会被自动重新启用；
+- 恢复前会重新读取当前 CPA auth files，并校验 auth file 和 auth index；
+- cooldown 状态是 CPAMP 派生的临时状态，不是 CPA auth file 的第三种原生状态；
+- worker 不会通过管理 API 暴露原始请求 `fail_body` / `raw_json`。
 
 ### CPA 与 CPA Manager Plus 配置边界
 
@@ -437,6 +472,10 @@ go run ./cmd/cpa-manager-plus
 - **从 CPA-Manager 迁移后看不到旧数据**：确认 Plus 容器挂载的是旧 `/data` volume，而不是新建的 `cpa-manager-plus-data` 空 volume。
 - **管理员密钥丢失**：已有 `settings.admin_credential_v1` 时，单独设置 `CPA_MANAGER_ADMIN_KEY` 不会覆盖旧凭证。请先停止 Manager Server、备份 `/data`，再按 [重置 Manager Server 管理员密钥](docs/reset-admin-key.zh-CN.md) 处理。
 - **完整 FAQ**：查看 [CPA Manager Plus 常见问题与解决方案](https://github.com/seakee/CPA-Manager-Plus/wiki/CPA%E2%80%90Manager-%E5%B8%B8%E8%A7%81%E9%97%AE%E9%A2%98%E4%B8%8E%E8%A7%A3%E5%86%B3%E6%96%B9%E6%A1%88) 或 [English FAQ and Troubleshooting](https://github.com/seakee/CPA-Manager-Plus/wiki/CPA-Manager-Plus-FAQ-and-Troubleshooting)。
+
+## 社区与反馈
+
+- Telegram 交流群: https://t.me/cpa_mp
 
 ## 参考
 

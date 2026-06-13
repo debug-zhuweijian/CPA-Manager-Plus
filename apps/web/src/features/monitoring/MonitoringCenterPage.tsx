@@ -7,6 +7,7 @@ import {
   useState,
   type ChangeEvent,
 } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import {
   buildRealtimeMonitorRows,
@@ -53,6 +54,7 @@ import { MonitoringDataPanel } from '@/features/monitoring/components/Monitoring
 import { MonitoringActionBar } from '@/features/monitoring/components/MonitoringActionBar';
 import { MonitoringCustomRangeModal } from '@/features/monitoring/components/MonitoringCustomRangeModal';
 import { MonitoringFiltersPanel } from '@/features/monitoring/components/MonitoringFiltersPanel';
+import { usePageTransitionLayer } from '@/components/common/PageTransitionLayer';
 import { IconInbox } from '@/components/ui/icons';
 import {
   MonitoringStatusHeader,
@@ -100,7 +102,6 @@ import { useHeaderRefresh } from '@/hooks/useHeaderRefresh';
 import { useInterval } from '@/hooks/useInterval';
 import { useRequestMonitoringAvailability } from '@/hooks/useRequestMonitoringAvailability';
 import { isFileLogsAvailable } from '@/features/logs/logFeatureAvailability';
-import { authFilesApi } from '@/services/api';
 import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
 import { formatFileSize } from '@/utils/format';
 import type { StatusBarData } from '@/utils/recentRequests';
@@ -121,6 +122,12 @@ const EMPTY_STATUS_BAR_DATA: StatusBarData = {
   totalFailure: 0,
 };
 
+const shortLabel = (t: TFunction, shortKey: string, fallbackKey: string) => {
+  const fallback = t(fallbackKey);
+  const label = t(shortKey, { defaultValue: fallback });
+  return label === shortKey ? fallback : label;
+};
+
 export function MonitoringCenterPage() {
   const { t, i18n } = useTranslation();
   const config = useConfigStore((state) => state.config);
@@ -128,6 +135,8 @@ export function MonitoringCenterPage() {
   const showNotification = useNotificationStore((state) => state.showNotification);
   const showConfirmation = useNotificationStore((state) => state.showConfirmation);
   const requestMonitoringAvailability = useRequestMonitoringAvailability();
+  const pageTransitionLayer = usePageTransitionLayer();
+  const isCurrentLayer = pageTransitionLayer ? pageTransitionLayer.status === 'current' : true;
   const initialAccountOverviewUiState = useRef(readAccountOverviewUiState());
   const initialMonitoringCenterUiState = useRef(readMonitoringCenterUiState());
   const [timeRange, setTimeRange] = useState<MonitoringTimeRange>(
@@ -198,7 +207,6 @@ export function MonitoringCenterPage() {
     table: DEFAULT_ACCOUNT_PAGE_SIZE,
     card: initialAccountOverviewUiState.current.cardPagination.pageSize,
   }));
-  const [accountStatusUpdating, setAccountStatusUpdating] = useState<Record<string, boolean>>({});
   const [apiKeyPage, setApiKeyPage] = useState(1);
   const [apiKeyPageSize, setApiKeyPageSize] = useState<number>(
     initialMonitoringCenterUiState.current.apiKeyPageSize
@@ -341,7 +349,7 @@ export function MonitoringCenterPage() {
     setCurrentAccountPage(1);
   }, [setCurrentAccountPage]);
 
-  useHeaderRefresh(refreshAll);
+  useHeaderRefresh(refreshAll, isCurrentLayer);
   useInterval(
     () => {
       if (monitoringLoading) {
@@ -349,7 +357,9 @@ export function MonitoringCenterPage() {
       }
       void refreshAll().catch(() => {});
     },
-    connectionStatus === 'connected' && Number(autoRefreshMs) > 0 ? Number(autoRefreshMs) : null
+    isCurrentLayer && connectionStatus === 'connected' && Number(autoRefreshMs) > 0
+      ? Number(autoRefreshMs)
+      : null
   );
 
   const monitoringUnavailable =
@@ -633,8 +643,8 @@ export function MonitoringCenterPage() {
   );
 
   const secondarySummaryCards = useMemo(
-    () => buildSecondarySummaryCards(scopedSummary, t),
-    [scopedSummary, t]
+    () => buildSecondarySummaryCards(scopedSummary, i18n.language, t),
+    [i18n.language, scopedSummary, t]
   );
 
   const dataTabs = useMemo<MonitoringTab<MonitoringDataTab>[]>(() => {
@@ -645,21 +655,24 @@ export function MonitoringCenterPage() {
     return [
       {
         id: 'accounts',
-        label: t('monitoring.data_tab_accounts'),
+        label: shortLabel(t, 'monitoring.data_tab_accounts_short', 'monitoring.data_tab_accounts'),
+        fullLabel: t('monitoring.data_tab_accounts'),
         icon: 'accounts',
         badge: accountRows.length,
         badgeTitle: t('monitoring.data_tab_accounts_badge_title', { count: accountRows.length }),
       },
       {
         id: 'apiKeys',
-        label: t('monitoring.data_tab_api_keys'),
+        label: shortLabel(t, 'monitoring.data_tab_api_keys_short', 'monitoring.data_tab_api_keys'),
+        fullLabel: t('monitoring.data_tab_api_keys'),
         icon: 'apiKeys',
         badge: apiKeyRows.length,
         badgeTitle: t('monitoring.data_tab_api_keys_badge_title', { count: apiKeyRows.length }),
       },
       {
         id: 'realtime',
-        label: t('monitoring.data_tab_realtime'),
+        label: shortLabel(t, 'monitoring.data_tab_realtime_short', 'monitoring.data_tab_realtime'),
+        fullLabel: t('monitoring.data_tab_realtime'),
         icon: 'realtime',
         badge: realtimeBadge,
         badgeTone: realtimeHasFailure ? 'failure' : 'default',
@@ -920,52 +933,6 @@ export function MonitoringCenterPage() {
     setApiKeyPageSize(normalizeAccountOverviewPageSize(pageSize, 'table'));
     setApiKeyPage(1);
   }, []);
-
-  const handleAccountStatusToggle = useCallback(
-    async (row: MonitoringAccountRow, enabled: boolean) => {
-      const authState = accountAuthStateByRowId.get(row.id);
-      const fileNames = authState?.toggleableFileNames ?? [];
-      if (fileNames.length === 0) return;
-
-      setAccountStatusUpdating((previous) => ({ ...previous, [row.id]: true }));
-
-      const results = await Promise.allSettled(
-        fileNames.map((fileName) => authFilesApi.setStatusWithFallback(fileName, !enabled))
-      );
-
-      const successCount = results.filter((result) => result.status === 'fulfilled').length;
-      const failureCount = results.length - successCount;
-
-      try {
-        await refreshMeta(false);
-      } finally {
-        setAccountStatusUpdating((previous) => {
-          const next = { ...previous };
-          delete next[row.id];
-          return next;
-        });
-      }
-
-      if (failureCount === 0) {
-        showNotification(
-          enabled
-            ? t('monitoring.account_overview_status_enabled_success', { count: successCount })
-            : t('monitoring.account_overview_status_disabled_success', { count: successCount }),
-          'success'
-        );
-        return;
-      }
-
-      showNotification(
-        t('monitoring.account_overview_status_partial', {
-          success: successCount,
-          failed: failureCount,
-        }),
-        successCount > 0 ? 'warning' : 'error'
-      );
-    },
-    [accountAuthStateByRowId, refreshMeta, showNotification, t]
-  );
 
   const handleRealtimePageSizeChange = useCallback((pageSize: number) => {
     setRealtimePageSize(pageSize);
@@ -1285,7 +1252,6 @@ export function MonitoringCenterPage() {
                 accountStatusDataByRowId={accountStatusDataByRowId}
                 emptyAccountStatusData={emptyAccountStatusData}
                 accountQuotaStates={accountQuotaStates}
-                accountStatusUpdating={accountStatusUpdating}
                 accountPageSize={accountPageSize}
                 accountPageSizeOptions={accountPageSizeOptions}
                 accountOverviewScopeText={accountOverviewScopeText}
@@ -1300,7 +1266,6 @@ export function MonitoringCenterPage() {
                 onModeChange={setAccountOverviewMode}
                 onAccountDisplayModeChange={setAccountDisplayMode}
                 onAccountSort={handleAccountSort}
-                onAccountStatusToggle={handleAccountStatusToggle}
                 onLoadAccountQuota={loadAccountQuota}
                 onToggleExpanded={toggleAccountExpanded}
                 onFocusAccount={focusAccount}

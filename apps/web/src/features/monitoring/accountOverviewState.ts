@@ -1,4 +1,5 @@
 import type { AuthFileItem } from '@/types';
+import { isDisabledAuthFile } from '@/utils/quota';
 import { normalizeRecentRequestAuthIndex, type StatusBarData } from '@/utils/recentRequests';
 import type {
   MonitoringAccountRow,
@@ -38,6 +39,8 @@ export const ACCOUNT_OVERVIEW_CARD_METRIC_KEYS = [
   'input-tokens',
   'output-tokens',
   'cached-tokens',
+  'cache-creation-tokens',
+  'cache-read-tokens',
 ] as const;
 const DEFAULT_ACCOUNT_OVERVIEW_CARD_PAGINATION = {
   page: 1,
@@ -75,7 +78,6 @@ export type MonitoringAccountOverviewUiState = {
 
 export type MonitoringAccountAuthState = {
   files: AuthFileItem[];
-  toggleableFileNames: string[];
   enabledState: MonitoringAccountEnabledState;
 };
 
@@ -552,68 +554,16 @@ export const buildMonitoringAccountStatusDataMap = (
   );
 };
 
-const normalizeAccountIdentityValue = (value: unknown) =>
-  (typeof value === 'string' ? value : value === null || value === undefined ? '' : String(value))
-    .trim()
-    .toLowerCase();
-
-const collectAccountIdentityCandidates = (values: unknown[]) =>
-  Array.from(new Set(values.map((value) => normalizeAccountIdentityValue(value)).filter(Boolean)));
-
-const resolveMonitoringAccountIdentityFromAuthFile = (file: AuthFileItem) => {
-  const normalizedAuthIndex = normalizeRecentRequestAuthIndex(file.authIndex ?? file['auth_index']);
-  if (!normalizedAuthIndex) return null;
-
-  const identity = [file.account, file.email, file.label, file.name, normalizedAuthIndex]
-    .map((value) => normalizeAccountIdentityValue(value))
-    .find(Boolean);
-
-  return identity || null;
-};
-
-const buildAccountAuthIndicesByIdentity = (authFilesByAuthIndex: Map<string, AuthFileItem>) => {
-  const indicesByIdentity = new Map<string, Set<string>>();
-
-  authFilesByAuthIndex.forEach((file) => {
-    const normalizedAuthIndex = normalizeRecentRequestAuthIndex(
-      file.authIndex ?? file['auth_index']
-    );
-    if (!normalizedAuthIndex) return;
-
-    const identity = resolveMonitoringAccountIdentityFromAuthFile(file);
-    if (!identity) return;
-
-    const existing = indicesByIdentity.get(identity) ?? new Set<string>();
-    existing.add(normalizedAuthIndex);
-    indicesByIdentity.set(identity, existing);
-  });
-
-  return indicesByIdentity;
-};
-
 export const buildMonitoringAccountAuthStateMap = (
   rows: MonitoringAccountRow[],
   authFilesByAuthIndex: Map<string, AuthFileItem>
-) => {
-  const authIndicesByIdentity = buildAccountAuthIndicesByIdentity(authFilesByAuthIndex);
-
-  return new Map(
-    rows.map((row) => {
-      const resolvedAuthIndices = collectAccountIdentityCandidates([row.account, row.id]).reduce<
-        Set<string>
-      >((set, candidate) => {
-        const authIndices = authIndicesByIdentity.get(candidate);
-        authIndices?.forEach((authIndex) => set.add(authIndex));
-        return set;
-      }, new Set<string>());
-
-      const authIndices =
-        resolvedAuthIndices.size > 0 ? Array.from(resolvedAuthIndices).sort() : row.authIndices;
-
-      return [row.id, buildMonitoringAccountAuthState(authIndices, authFilesByAuthIndex)] as const;
-    })
+) =>
+  new Map(
+    rows.map(
+      (row) =>
+        [row.id, buildMonitoringAccountAuthState(row.authIndices, authFilesByAuthIndex)] as const
+    )
   );
-};
 
 export const buildMonitoringAccountAuthState = (
   authIndices: string[],
@@ -635,7 +585,7 @@ export const buildMonitoringAccountAuthState = (
     .sort((left, right) => left.name.localeCompare(right.name));
 
   const toggleableFiles = files.filter((file) => !isRuntimeOnlyAuthFile(file));
-  const disabledCount = toggleableFiles.filter((file) => file.disabled === true).length;
+  const disabledCount = toggleableFiles.filter((file) => isDisabledAuthFile(file)).length;
   const enabledState: MonitoringAccountEnabledState =
     toggleableFiles.length === 0
       ? 'unavailable'
@@ -647,7 +597,6 @@ export const buildMonitoringAccountAuthState = (
 
   return {
     files,
-    toggleableFileNames: toggleableFiles.map((file) => file.name),
     enabledState,
   };
 };

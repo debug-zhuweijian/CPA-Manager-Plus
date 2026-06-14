@@ -17,7 +17,11 @@ import { useAuthStore, useConfigStore, useNotificationStore } from '@/stores';
 import type { ProviderKeyConfig } from '@/types';
 import { buildHeaderObject, headersToEntries, normalizeHeaderEntries } from '@/utils/headers';
 import { normalizeAuthIndex } from '@/utils/authIndex';
-import { areKeyValueEntriesEqual, areModelEntriesEqual, areStringArraysEqual } from '@/utils/compare';
+import {
+  areKeyValueEntriesEqual,
+  areModelEntriesEqual,
+  areStringArraysEqual,
+} from '@/utils/compare';
 import { entriesToModels, modelsToEntries } from '@/components/ui/modelInputListUtils';
 import { excludedModelsToText, parseExcludedModels } from '@/components/providers/utils';
 import type { ProviderFormState } from '@/components/providers';
@@ -77,7 +81,9 @@ const buildCodexBaseline = (form: ProviderFormState): CodexFormBaseline => ({
   apiKey: String(form.apiKey ?? '').trim(),
   authIndex: normalizeAuthIndex(form.authIndex) ?? '',
   priority:
-    form.priority !== undefined && Number.isFinite(form.priority) ? Math.trunc(form.priority) : null,
+    form.priority !== undefined && Number.isFinite(form.priority)
+      ? Math.trunc(form.priority)
+      : null,
   prefix: String(form.prefix ?? '').trim(),
   baseUrl: String(form.baseUrl ?? '').trim(),
   websockets: Boolean(form.websockets),
@@ -285,7 +291,7 @@ export function AiProvidersCodexEditPage() {
         prev.modelEntries.forEach((entry) => {
           const name = entry.name.trim();
           if (!name) return;
-          mergedMap.set(name.toLowerCase(), { name, alias: entry.alias?.trim() || '' });
+          mergedMap.set(name.toLowerCase(), { ...entry, name, alias: entry.alias?.trim() || '' });
         });
 
         selectedModels.forEach((model) => {
@@ -381,7 +387,14 @@ export function AiProvidersCodexEditPage() {
     autoFetchSignatureRef.current = signature;
 
     void fetchCodexModelDiscovery();
-  }, [fetchCodexModelDiscovery, form.apiKey, form.authIndex, form.baseUrl, form.headers, modelDiscoveryOpen]);
+  }, [
+    fetchCodexModelDiscovery,
+    form.apiKey,
+    form.authIndex,
+    form.baseUrl,
+    form.headers,
+    modelDiscoveryOpen,
+  ]);
 
   useEffect(() => {
     const availableNames = new Set(discoveredModels.map((model) => model.name));
@@ -457,6 +470,8 @@ export function AiProvidersCodexEditPage() {
         models: entriesToModels(form.modelEntries),
         excludedModels: parseExcludedModels(form.excludedText),
         authIndex: normalizeAuthIndex(form.authIndex) ?? undefined,
+        disableCooling: form.disableCooling,
+        experimentalCchSigning: form.experimentalCchSigning,
       };
 
       const nextList =

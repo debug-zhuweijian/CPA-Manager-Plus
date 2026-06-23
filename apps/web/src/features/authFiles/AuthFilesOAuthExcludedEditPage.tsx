@@ -13,9 +13,13 @@ import { useEdgeSwipeBack } from '@/hooks/useEdgeSwipeBack';
 import { useAuthStore, useNotificationStore } from '@/stores';
 import { authFilesApi } from '@/services/api';
 import type { AuthFileItem, OAuthModelAliasEntry } from '@/types';
+import {
+  buildOAuthExcludedModelList,
+  type OAuthExcludedModelDefinition,
+} from './model/oauthExcludedModelList';
 import styles from './AuthFilesOAuthExcludedEditPage.module.scss';
 
-type AuthFileModelItem = { id: string; display_name?: string; type?: string; owned_by?: string };
+type AuthFileModelItem = OAuthExcludedModelDefinition;
 
 type LocationState = { fromAuthFiles?: boolean } | null;
 
@@ -104,6 +108,14 @@ export function AuthFilesOAuthExcludedEditPage() {
     if (!resolvedProviderKey) return false;
     return Object.prototype.hasOwnProperty.call(excluded, resolvedProviderKey);
   }, [excluded, resolvedProviderKey]);
+  const currentExcludedModels = useMemo(
+    () => (resolvedProviderKey ? (excluded[resolvedProviderKey] ?? []) : []),
+    [excluded, resolvedProviderKey]
+  );
+  const visibleModelsList = useMemo(
+    () => buildOAuthExcludedModelList(modelsList, currentExcludedModels),
+    [currentExcludedModels, modelsList]
+  );
 
   const title = useMemo(() => {
     if (isEditing) {
@@ -194,9 +206,8 @@ export function AuthFilesOAuthExcludedEditPage() {
       setSelectedModels(new Set());
       return;
     }
-    const existing = excluded[resolvedProviderKey] ?? [];
-    setSelectedModels(new Set(existing));
-  }, [excluded, resolvedProviderKey]);
+    setSelectedModels(new Set(currentExcludedModels));
+  }, [currentExcludedModels, resolvedProviderKey]);
 
   useEffect(() => {
     if (!resolvedProviderKey || excludedUnsupported) {
@@ -223,14 +234,17 @@ export function AuthFilesOAuthExcludedEditPage() {
             ? (err as { status?: unknown }).status
             : undefined;
 
-        if (status === 404) {
+        const errorMessage = err instanceof Error ? err.message : '';
+        const isUnknownChannel =
+          status === 400 && errorMessage.trim().toLowerCase().includes('unknown channel');
+
+        if (status === 404 || isUnknownChannel) {
           setModelsList([]);
           setModelsError('unsupported');
           return;
         }
 
-        const errorMessage = err instanceof Error ? err.message : '';
-        showNotification(`${t('notification.load_failed')}: ${errorMessage}`, 'error');
+        showNotification(`${t('oauth_excluded.load_failed')}: ${errorMessage}`, 'error');
       })
       .finally(() => {
         if (cancelled) return;
@@ -380,10 +394,10 @@ export function AuthFilesOAuthExcludedEditPage() {
                       <LoadingSpinner size={14} />
                       <span>{t('oauth_excluded.models_loading')}</span>
                     </>
+                  ) : visibleModelsList.length > 0 ? (
+                    <span>{t('oauth_excluded.models_loaded', { count: visibleModelsList.length })}</span>
                   ) : modelsError === 'unsupported' ? (
                     <span>{t('oauth_excluded.models_unsupported')}</span>
-                  ) : modelsList.length > 0 ? (
-                    <span>{t('oauth_excluded.models_loaded', { count: modelsList.length })}</span>
                   ) : (
                     <span>{t('oauth_excluded.no_models_available')}</span>
                   )}
@@ -396,9 +410,9 @@ export function AuthFilesOAuthExcludedEditPage() {
                 <LoadingSpinner size={16} />
                 <span>{t('common.loading')}</span>
               </div>
-            ) : modelsList.length > 0 ? (
+            ) : visibleModelsList.length > 0 ? (
               <div className={styles.modelList}>
-                {modelsList.map((model) => {
+                {visibleModelsList.map((model) => {
                   const checked = selectedModels.has(model.id);
                   return (
                     <SelectionCheckbox
@@ -413,6 +427,11 @@ export function AuthFilesOAuthExcludedEditPage() {
                           <span className={styles.modelId}>{model.id}</span>
                           {model.display_name && model.display_name !== model.id && (
                             <span className={styles.modelDisplayName}>{model.display_name}</span>
+                          )}
+                          {model.source === 'saved' && (
+                            <span className={styles.modelMissingBadge}>
+                              {t('oauth_excluded.saved_model_not_listed')}
+                            </span>
                           )}
                         </>
                       }

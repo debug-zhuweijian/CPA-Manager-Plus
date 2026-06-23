@@ -75,7 +75,7 @@ export function normalizeModelList(payload: unknown, { dedupe = false } = {}): M
 
   const seen = new Set<string>();
   return normalized.filter((model) => {
-    const key = (model?.name || '').toLowerCase();
+    const key = model?.name || '';
     if (!key || seen.has(key)) {
       return false;
     }

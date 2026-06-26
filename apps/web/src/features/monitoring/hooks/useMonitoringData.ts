@@ -551,8 +551,7 @@ export function useMonitoringData({
   );
   const displayEventsHasMore = currentAnalyticsData?.events?.has_more ?? eventsHasMore;
   const eventsLoadedCount = displayEventItems.length;
-  const displayEventsTotalCount =
-    currentAnalyticsData?.events?.total_count ?? eventsLoadedCount;
+  const displayEventsTotalCount = currentAnalyticsData?.events?.total_count ?? eventsLoadedCount;
 
   useEffect(() => {
     const page = currentAnalyticsData?.events;
@@ -767,7 +766,14 @@ export function useMonitoringData({
             channelByAuthIndex
           )
         : buildAccountRows(filteredRows),
-    [currentAnalyticsData, authFileMap, authMetaMap, channelByAuthIndex, filteredRows, sourceInfoMap]
+    [
+      currentAnalyticsData,
+      authFileMap,
+      authMetaMap,
+      channelByAuthIndex,
+      filteredRows,
+      sourceInfoMap,
+    ]
   );
   const apiKeyRows = useMemo(
     () =>
@@ -798,6 +804,10 @@ export function useMonitoringData({
       providers: uniqueOptionValues(rangeFilteredRows.map((row) => row.provider)),
       models: uniqueOptionValues(rangeFilteredRows.map((row) => row.model)),
       channels: uniqueOptionValues(rangeFilteredRows.map((row) => row.channel)),
+      headerErrorKinds: uniqueOptionValues(rangeFilteredRows.map((row) => row.headerErrorKind)),
+      headerErrorCodes: uniqueOptionValues(rangeFilteredRows.map((row) => row.headerErrorCode)),
+      headerQuotaPlans: uniqueOptionValues(rangeFilteredRows.map((row) => row.headerQuotaPlanType)),
+      headerTraceIds: uniqueOptionValues(rangeFilteredRows.map((row) => row.headerTraceId)),
     }),
     [rangeFilteredRows]
   );

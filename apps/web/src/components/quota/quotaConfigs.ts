@@ -19,7 +19,7 @@ import type {
   XaiQuotaState,
 } from '@/types';
 import type { UsageHeaderSnapshot } from '@/services/api/usageService';
-import type { AntigravityQuotaData } from '@/utils/quota';
+import type { AntigravityQuotaData, CodexQuotaData } from '@/utils/quota';
 import { IconInfo } from '@/components/ui/icons';
 import { resetCodexQuota } from '@/services/api/codexQuota';
 import {
@@ -729,12 +729,7 @@ export const ANTIGRAVITY_CONFIG: QuotaConfig<AntigravityQuotaState, AntigravityQ
 
 export const CODEX_CONFIG: QuotaConfig<
   CodexQuotaState,
-  {
-    planType: string | null;
-    windows: CodexQuotaWindow[];
-    subscriptionActiveUntil: string | null;
-    rateLimitResetCreditsAvailableCount: number | null;
-  }
+  CodexQuotaData
 > = {
   type: 'codex',
   i18nPrefix: 'codex_quota',
@@ -755,6 +750,8 @@ export const CODEX_CONFIG: QuotaConfig<
     planType: data.planType,
     subscriptionActiveUntil: data.subscriptionActiveUntil,
     rateLimitResetCreditsAvailableCount: data.rateLimitResetCreditsAvailableCount,
+    rateLimitResetCredits: data.rateLimitResetCredits,
+    rateLimitResetCreditsError: data.rateLimitResetCreditsError,
     ...buildCodexQuotaAuthIdentity(file),
     fetchedAtMs: Date.now(),
   }),

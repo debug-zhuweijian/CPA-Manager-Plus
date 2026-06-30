@@ -78,7 +78,6 @@ import {
   buildAccountQuotaErrorEntry,
   buildObservedCodexAccountQuotaEntry,
   buildChannelOptionsFromValues,
-  buildHeaderValueOptionsFromValues,
   buildMonitoringInitialStateFromQuery,
   buildModelOptionsFromValues,
   buildPaginationState,
@@ -202,15 +201,6 @@ export function MonitoringCenterPage() {
   );
   const [selectedApiKeyHash, setSelectedApiKeyHash] = useState(
     () => initialMonitoringCenterUiState.current.selectedApiKeyHash
-  );
-  const [selectedHeaderErrorKind, setSelectedHeaderErrorKind] = useState(
-    () => initialMonitoringCenterUiState.current.selectedHeaderErrorKind
-  );
-  const [selectedHeaderErrorCode, setSelectedHeaderErrorCode] = useState(
-    () => initialMonitoringCenterUiState.current.selectedHeaderErrorCode
-  );
-  const [selectedHeaderQuotaPlan, setSelectedHeaderQuotaPlan] = useState(
-    () => initialMonitoringCenterUiState.current.selectedHeaderQuotaPlan
   );
   const [selectedHeaderTraceId, setSelectedHeaderTraceId] = useState(
     () => initialMonitoringCenterUiState.current.selectedHeaderTraceId
@@ -350,9 +340,6 @@ export function MonitoringCenterPage() {
       model: selectedModel,
       channel: selectedChannel,
       apiKeyHash: selectedApiKeyHash,
-      headerErrorKind: selectedHeaderErrorKind,
-      headerErrorCode: selectedHeaderErrorCode,
-      headerQuotaPlan: selectedHeaderQuotaPlan,
       headerTraceId: selectedHeaderTraceId,
       status: selectedStatus,
     }),
@@ -365,9 +352,6 @@ export function MonitoringCenterPage() {
       selectedAccount,
       selectedApiKeyHash,
       selectedChannel,
-      selectedHeaderErrorCode,
-      selectedHeaderErrorKind,
-      selectedHeaderQuotaPlan,
       selectedHeaderTraceId,
       selectedModel,
       selectedProvider,
@@ -515,9 +499,6 @@ export function MonitoringCenterPage() {
       selectedModel,
       selectedChannel,
       selectedApiKeyHash,
-      selectedHeaderErrorKind,
-      selectedHeaderErrorCode,
-      selectedHeaderQuotaPlan,
       selectedHeaderTraceId,
       selectedStatus,
       apiKeyPageSize,
@@ -534,9 +515,6 @@ export function MonitoringCenterPage() {
     selectedAccount,
     selectedApiKeyHash,
     selectedChannel,
-    selectedHeaderErrorCode,
-    selectedHeaderErrorKind,
-    selectedHeaderQuotaPlan,
     selectedHeaderTraceId,
     selectedModel,
     selectedProvider,
@@ -573,42 +551,6 @@ export function MonitoringCenterPage() {
   const apiKeyOptions = useMemo(
     () => buildApiKeyOptionsFromRows(monitoringFilterOptions.apiKeyRows, selectedApiKeyHash, t),
     [monitoringFilterOptions.apiKeyRows, selectedApiKeyHash, t]
-  );
-
-  const headerErrorKindOptions = useMemo(
-    () =>
-      buildHeaderValueOptionsFromValues(
-        monitoringFilterOptions.headerErrorKinds,
-        selectedHeaderErrorKind,
-        t,
-        'monitoring.filter_all_header_error_kinds',
-        'monitoring.filter_all_header_error_kinds_short'
-      ),
-    [monitoringFilterOptions.headerErrorKinds, selectedHeaderErrorKind, t]
-  );
-
-  const headerErrorCodeOptions = useMemo(
-    () =>
-      buildHeaderValueOptionsFromValues(
-        monitoringFilterOptions.headerErrorCodes,
-        selectedHeaderErrorCode,
-        t,
-        'monitoring.filter_all_header_error_codes',
-        'monitoring.filter_all_header_error_codes_short'
-      ),
-    [monitoringFilterOptions.headerErrorCodes, selectedHeaderErrorCode, t]
-  );
-
-  const headerQuotaPlanOptions = useMemo(
-    () =>
-      buildHeaderValueOptionsFromValues(
-        monitoringFilterOptions.headerQuotaPlans,
-        selectedHeaderQuotaPlan,
-        t,
-        'monitoring.filter_all_header_quota_plans',
-        'monitoring.filter_all_header_quota_plans_short'
-      ),
-    [monitoringFilterOptions.headerQuotaPlans, selectedHeaderQuotaPlan, t]
   );
 
   const statusOptions = useMemo(() => buildStatusOptions(t), [t]);
@@ -692,9 +634,6 @@ export function MonitoringCenterPage() {
       selectedAccount,
       selectedApiKeyHash,
       selectedChannel,
-      selectedHeaderErrorCode,
-      selectedHeaderErrorKind,
-      selectedHeaderQuotaPlan,
       selectedHeaderTraceId,
       selectedModel,
       selectedProvider,
@@ -708,9 +647,6 @@ export function MonitoringCenterPage() {
       selectedAccount,
       selectedApiKeyHash,
       selectedChannel,
-      selectedHeaderErrorCode,
-      selectedHeaderErrorKind,
-      selectedHeaderQuotaPlan,
       selectedHeaderTraceId,
       selectedModel,
       selectedProvider,
@@ -769,9 +705,6 @@ export function MonitoringCenterPage() {
     selectedModel !== 'all' ||
     selectedChannel !== 'all' ||
     selectedApiKeyHash !== 'all' ||
-    selectedHeaderErrorKind !== 'all' ||
-    selectedHeaderErrorCode !== 'all' ||
-    selectedHeaderQuotaPlan !== 'all' ||
     selectedHeaderTraceId !== 'all' ||
     selectedStatus !== 'all' ||
     Boolean(drilldownAuthFile) ||
@@ -882,9 +815,6 @@ export function MonitoringCenterPage() {
     setSelectedModel(snapshot.selectedModel);
     setSelectedChannel(snapshot.selectedChannel);
     setSelectedApiKeyHash(snapshot.selectedApiKeyHash);
-    setSelectedHeaderErrorKind(snapshot.selectedHeaderErrorKind);
-    setSelectedHeaderErrorCode(snapshot.selectedHeaderErrorCode);
-    setSelectedHeaderQuotaPlan(snapshot.selectedHeaderQuotaPlan);
     setSelectedHeaderTraceId(snapshot.selectedHeaderTraceId);
     setSelectedStatus(snapshot.selectedStatus);
   }, []);
@@ -898,9 +828,6 @@ export function MonitoringCenterPage() {
     setSelectedModel('all');
     setSelectedChannel('all');
     setSelectedApiKeyHash('all');
-    setSelectedHeaderErrorKind('all');
-    setSelectedHeaderErrorCode('all');
-    setSelectedHeaderQuotaPlan('all');
     setSelectedHeaderTraceId('all');
     setSelectedStatus('all');
     setDrilldownAuthFile('');
@@ -1094,9 +1021,6 @@ export function MonitoringCenterPage() {
           selectedModel,
           selectedChannel,
           selectedApiKeyHash,
-          selectedHeaderErrorKind,
-          selectedHeaderErrorCode,
-          selectedHeaderQuotaPlan,
           selectedHeaderTraceId,
           selectedStatus,
         };
@@ -1112,9 +1036,6 @@ export function MonitoringCenterPage() {
       selectedAccount,
       selectedApiKeyHash,
       selectedChannel,
-      selectedHeaderErrorCode,
-      selectedHeaderErrorKind,
-      selectedHeaderQuotaPlan,
       selectedHeaderTraceId,
       selectedModel,
       selectedProvider,
@@ -1413,9 +1334,6 @@ export function MonitoringCenterPage() {
         selectedModel={selectedModel}
         selectedChannel={selectedChannel}
         selectedApiKeyHash={selectedApiKeyHash}
-        selectedHeaderErrorKind={selectedHeaderErrorKind}
-        selectedHeaderErrorCode={selectedHeaderErrorCode}
-        selectedHeaderQuotaPlan={selectedHeaderQuotaPlan}
         selectedStatus={selectedStatus}
         searchInput={searchInput}
         accountOptions={accountOptions}
@@ -1423,9 +1341,6 @@ export function MonitoringCenterPage() {
         modelOptions={modelOptions}
         channelOptions={channelOptions}
         apiKeyOptions={apiKeyOptions}
-        headerErrorKindOptions={headerErrorKindOptions}
-        headerErrorCodeOptions={headerErrorCodeOptions}
-        headerQuotaPlanOptions={headerQuotaPlanOptions}
         statusOptions={statusOptions}
         combinedError={combinedError}
         usageStatisticsEnabled={Boolean(config?.usageStatisticsEnabled)}
@@ -1439,9 +1354,6 @@ export function MonitoringCenterPage() {
         onModelChange={setSelectedModel}
         onChannelChange={setSelectedChannel}
         onApiKeyChange={setSelectedApiKeyHash}
-        onHeaderErrorKindChange={setSelectedHeaderErrorKind}
-        onHeaderErrorCodeChange={setSelectedHeaderErrorCode}
-        onHeaderQuotaPlanChange={setSelectedHeaderQuotaPlan}
         onStatusChange={(value) => setSelectedStatus(value as StatusFilter)}
         onSearchChange={setSearchInput}
         onClearFilters={clearFilters}

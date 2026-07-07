@@ -2361,11 +2361,7 @@ func sumCost(stats []store.ModelStat, prices map[string]store.ModelPrice) float6
 }
 
 func costForStat(stat store.ModelStat, prices map[string]store.ModelPrice) float64 {
-	model := stat.BillingModel
-	if model == "" {
-		model = stat.Model
-	}
-	return pricing.CostForModelWithServiceTier(model, stat.ServiceTier, pricing.ModelTokens{
+	return pricing.CostForModelCandidatesWithServiceTier([]string{stat.BillingModel, stat.Model}, stat.ServiceTier, pricing.ModelTokens{
 		InputTokens:         stat.InputTokens,
 		OutputTokens:        stat.OutputTokens,
 		CachedTokens:        stat.CachedTokens,
@@ -2375,11 +2371,7 @@ func costForStat(stat store.ModelStat, prices map[string]store.ModelPrice) float
 }
 
 func costForTimelinePoint(point store.TimelinePoint, prices map[string]store.ModelPrice) float64 {
-	model := point.BillingModel
-	if model == "" {
-		model = point.Model
-	}
-	return pricing.CostForModelWithServiceTier(model, point.ServiceTier, pricing.ModelTokens{
+	return pricing.CostForModelCandidatesWithServiceTier([]string{point.BillingModel, point.Model}, point.ServiceTier, pricing.ModelTokens{
 		InputTokens:         point.InputTokens,
 		OutputTokens:        point.OutputTokens,
 		CachedTokens:        point.CachedTokens,
@@ -2389,11 +2381,7 @@ func costForTimelinePoint(point store.TimelinePoint, prices map[string]store.Mod
 }
 
 func costForHeatmapPoint(point store.HeatmapPoint, prices map[string]store.ModelPrice) float64 {
-	model := point.BillingModel
-	if model == "" {
-		model = point.Model
-	}
-	return pricing.CostForModelWithServiceTier(model, point.ServiceTier, pricing.ModelTokens{
+	return pricing.CostForModelCandidatesWithServiceTier([]string{point.BillingModel, point.Model}, point.ServiceTier, pricing.ModelTokens{
 		InputTokens:         point.InputTokens,
 		OutputTokens:        point.OutputTokens,
 		CachedTokens:        point.CachedTokens,
@@ -2403,11 +2391,7 @@ func costForHeatmapPoint(point store.HeatmapPoint, prices map[string]store.Model
 }
 
 func costForChannelStat(stat store.ChannelModelStat, prices map[string]store.ModelPrice) float64 {
-	model := stat.BillingModel
-	if model == "" {
-		model = stat.Model
-	}
-	return pricing.CostForModelWithServiceTier(model, stat.ServiceTier, pricing.ModelTokens{
+	return pricing.CostForModelCandidatesWithServiceTier([]string{stat.BillingModel, stat.Model}, stat.ServiceTier, pricing.ModelTokens{
 		InputTokens:         stat.InputTokens,
 		OutputTokens:        stat.OutputTokens,
 		CachedTokens:        stat.CachedTokens,
@@ -2417,11 +2401,7 @@ func costForChannelStat(stat store.ChannelModelStat, prices map[string]store.Mod
 }
 
 func costForAccountModelStat(stat store.AccountModelStat, prices map[string]store.ModelPrice) float64 {
-	model := stat.BillingModel
-	if model == "" {
-		model = stat.Model
-	}
-	return pricing.CostForModelWithServiceTier(model, stat.ServiceTier, pricing.ModelTokens{
+	return pricing.CostForModelCandidatesWithServiceTier([]string{stat.BillingModel, stat.Model}, stat.ServiceTier, pricing.ModelTokens{
 		InputTokens:         stat.InputTokens,
 		OutputTokens:        stat.OutputTokens,
 		CachedTokens:        stat.CachedTokens,
@@ -2431,11 +2411,7 @@ func costForAccountModelStat(stat store.AccountModelStat, prices map[string]stor
 }
 
 func costForAPIKeyModelStat(stat store.APIKeyModelStat, prices map[string]store.ModelPrice) float64 {
-	model := stat.BillingModel
-	if model == "" {
-		model = stat.Model
-	}
-	return pricing.CostForModelWithServiceTier(model, stat.ServiceTier, pricing.ModelTokens{
+	return pricing.CostForModelCandidatesWithServiceTier([]string{stat.BillingModel, stat.Model}, stat.ServiceTier, pricing.ModelTokens{
 		InputTokens:         stat.InputTokens,
 		OutputTokens:        stat.OutputTokens,
 		CachedTokens:        stat.CachedTokens,
@@ -2445,11 +2421,7 @@ func costForAPIKeyModelStat(stat store.APIKeyModelStat, prices map[string]store.
 }
 
 func costForCredentialModelStat(stat store.CredentialModelStat, prices map[string]store.ModelPrice) float64 {
-	model := stat.BillingModel
-	if model == "" {
-		model = stat.Model
-	}
-	return pricing.CostForModelWithServiceTier(model, stat.ServiceTier, pricing.ModelTokens{
+	return pricing.CostForModelCandidatesWithServiceTier([]string{stat.BillingModel, stat.Model}, stat.ServiceTier, pricing.ModelTokens{
 		InputTokens:         stat.InputTokens,
 		OutputTokens:        stat.OutputTokens,
 		CachedTokens:        stat.CachedTokens,
@@ -2459,11 +2431,7 @@ func costForCredentialModelStat(stat store.CredentialModelStat, prices map[strin
 }
 
 func costForCredentialTimelinePoint(point store.CredentialTimelinePoint, prices map[string]store.ModelPrice) float64 {
-	model := point.BillingModel
-	if model == "" {
-		model = point.Model
-	}
-	return pricing.CostForModelWithServiceTier(model, point.ServiceTier, pricing.ModelTokens{
+	return pricing.CostForModelCandidatesWithServiceTier([]string{point.BillingModel, point.Model}, point.ServiceTier, pricing.ModelTokens{
 		InputTokens:         point.InputTokens,
 		OutputTokens:        point.OutputTokens,
 		CachedTokens:        point.CachedTokens,

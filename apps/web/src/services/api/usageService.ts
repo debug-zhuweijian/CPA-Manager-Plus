@@ -1,5 +1,22 @@
 import axios from 'axios';
 import type { UsagePayload } from '@/features/monitoring/hooks/useUsageData';
+import {
+  getDemoAccountActionCandidates,
+  getDemoAccountProcessingPolicy,
+  getDemoApiKeyAliases,
+  getDemoCodexInspectionRun,
+  getDemoCodexInspectionRuns,
+  getDemoDashboardSummary,
+  getDemoHeaderSnapshots,
+  getDemoManagerConfig,
+  getDemoModelPrices,
+  getDemoMonitoringAnalytics,
+  getDemoQuotaCooldowns,
+  getDemoUsagePayload,
+  getDemoUsageServiceInfo,
+  getDemoUsageServiceStatus,
+} from '@/features/demo/demoFixtures';
+import { isDemoMode } from '@/features/demo/demoMode';
 import { normalizeApiBase } from '@/utils/connection';
 import type { ModelPrice } from '@/utils/usage';
 
@@ -1306,8 +1323,110 @@ const parseContentDispositionFilename = (value: string): string => {
   return plainMatch?.[1]?.trim() || '';
 };
 
+const getDemoAccountActionCandidateResponse = (
+  id: number,
+  status?: AccountActionStatus
+): AccountActionCandidateResponse => {
+  const candidates = getDemoAccountActionCandidates().items;
+  const fallback = candidates[0];
+  const item = candidates.find((candidate) => candidate.id === id) ?? fallback;
+  return {
+    item: {
+      ...item,
+      status: status ?? item.status,
+      updatedAtMs: Date.now(),
+    },
+  };
+};
+
+const getDemoAccountActionCandidatesResponse = (
+  status: string,
+  limit: number
+): AccountActionCandidatesResponse => {
+  const response = getDemoAccountActionCandidates();
+  const filtered =
+    !status || status === 'all'
+      ? response.items
+      : response.items.filter((item) => item.status === status);
+  return {
+    items: filtered.slice(0, limit),
+    pendingCount: response.pendingCount,
+  };
+};
+
+const getDemoPatchedAccountProcessingPolicy = (
+  patch: AccountProcessingPolicyPatch
+): AccountProcessingPolicy => {
+  const policy = getDemoAccountProcessingPolicy();
+  return {
+    ...policy,
+    updatedAtMs: Date.now(),
+    codexQuotaCooldown: {
+      ...policy.codexQuotaCooldown,
+      enabled: patch.codexQuotaCooldownEnabled ?? policy.codexQuotaCooldown.enabled,
+    },
+    authIssueQueue: {
+      ...policy.authIssueQueue,
+      enabled: patch.authIssueQueueEnabled ?? policy.authIssueQueue.enabled,
+    },
+    authIssueAutoDisable: {
+      ...policy.authIssueAutoDisable,
+      enabled: patch.authIssueAutoDisableEnabled ?? policy.authIssueAutoDisable.enabled,
+    },
+  };
+};
+
+const getDemoCodexInspectionActionsResponse = (
+  resultIds: number[]
+): CodexInspectionActionsResponse => {
+  const detail = getDemoCodexInspectionRun();
+  const selected = resultIds.length
+    ? detail.results.filter((result) => resultIds.includes(result.id))
+    : detail.results;
+  return {
+    outcomes: selected.map((result) => ({
+      resultId: result.id,
+      accountKey: result.accountKey,
+      fileName: result.fileName,
+      displayAccount: result.displayAccount,
+      action: result.action,
+      status: 'done',
+      success: true,
+    })),
+    detail,
+  };
+};
+
+const getDemoModelPriceSyncResponse = (models?: string[]): ModelPriceSyncResponse => {
+  const prices = getDemoModelPrices().prices;
+  const selectedModels = new Set((models || []).map((model) => model.trim()).filter(Boolean));
+  const selectedPrices =
+    selectedModels.size > 0
+      ? Object.fromEntries(
+          Object.entries(prices).filter(([model]) => selectedModels.has(model))
+        )
+      : prices;
+
+  return {
+    prices: selectedPrices,
+    source: 'demo',
+    sources: ['demo'],
+    imported: Object.keys(selectedPrices).length,
+    skipped: 0,
+    matched: selectedPrices,
+    candidates: [],
+    unmatched: [],
+    proxyUsed: false,
+    sourceResults: [{ source: 'demo', models: Object.keys(selectedPrices).length, skipped: 0 }],
+  };
+};
+
 export const usageServiceApi = {
   getInfo: async (base: string): Promise<UsageServiceInfo> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoUsageServiceInfo();
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.get<UsageServiceInfo>(buildUrl(base, '/usage-service/info'), {
         timeout: USAGE_SERVICE_TIMEOUT_MS,
@@ -1321,6 +1440,10 @@ export const usageServiceApi = {
     payload: UsageServiceSetupRequest,
     adminKey?: string
   ): Promise<void> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return;
+    }
+
     await withUsageServiceError(async () => {
       await axios.post(buildUrl(base, '/setup'), payload, {
         timeout: USAGE_SERVICE_TIMEOUT_MS,
@@ -1333,6 +1456,10 @@ export const usageServiceApi = {
     base: string,
     managementKey?: string
   ): Promise<ManagerConfigResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoManagerConfig();
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.get<ManagerConfigResponse>(
         buildUrl(base, '/usage-service/config'),
@@ -1350,6 +1477,10 @@ export const usageServiceApi = {
     config: ManagerConfig,
     managementKey?: string
   ): Promise<ManagerConfigResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return { ...getDemoManagerConfig(), config, source: 'db' };
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.put<ManagerConfigResponse>(
         buildUrl(base, '/usage-service/config'),
@@ -1368,6 +1499,11 @@ export const usageServiceApi = {
     managementKey?: string,
     limit = 20
   ): Promise<CodexInspectionRunsResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      const response = getDemoCodexInspectionRuns();
+      return { items: response.items.slice(0, limit) };
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.get<CodexInspectionRunsResponse>(
         buildUrl(base, '/v0/management/codex-inspection/runs'),
@@ -1386,6 +1522,10 @@ export const usageServiceApi = {
     managementKey: string | undefined,
     id: number
   ): Promise<CodexInspectionRunDetail> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoCodexInspectionRun();
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.get<CodexInspectionRunDetail>(
         buildUrl(base, `/v0/management/codex-inspection/runs/${id}`),
@@ -1402,6 +1542,10 @@ export const usageServiceApi = {
     base: string,
     managementKey?: string
   ): Promise<CodexInspectionRunDetail> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoCodexInspectionRun();
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.post<CodexInspectionRunDetail>(
         buildUrl(base, '/v0/management/codex-inspection/run'),
@@ -1421,6 +1565,10 @@ export const usageServiceApi = {
     runId: number,
     resultIds: number[]
   ): Promise<CodexInspectionActionsResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoCodexInspectionActionsResponse(resultIds);
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.post<CodexInspectionActionsResponse>(
         buildUrl(base, `/v0/management/codex-inspection/runs/${runId}/actions`),
@@ -1435,6 +1583,10 @@ export const usageServiceApi = {
   },
 
   getStatus: async (base: string, managementKey?: string): Promise<UsageServiceStatus> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoUsageServiceStatus();
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.get<UsageServiceStatus>(buildUrl(base, '/status'), {
         timeout: USAGE_SERVICE_TIMEOUT_MS,
@@ -1448,6 +1600,10 @@ export const usageServiceApi = {
     base: string,
     managementKey?: string
   ): Promise<AccountProcessingPolicy> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoAccountProcessingPolicy();
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.get<AccountProcessingPolicy>(
         buildUrl(base, '/usage-service/account-processing-policy'),
@@ -1464,6 +1620,10 @@ export const usageServiceApi = {
     base: string,
     managementKey?: string
   ): Promise<QuotaCooldownInfo[]> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoQuotaCooldowns();
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.get<QuotaCooldownsResponse>(
         buildUrl(base, '/usage-service/quota-cooldowns'),
@@ -1481,6 +1641,10 @@ export const usageServiceApi = {
     managementKey: string,
     patch: AccountProcessingPolicyPatch
   ): Promise<AccountProcessingPolicy> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoPatchedAccountProcessingPolicy(patch);
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.patch<AccountProcessingPolicy>(
         buildUrl(base, '/usage-service/account-processing-policy'),
@@ -1495,6 +1659,10 @@ export const usageServiceApi = {
   },
 
   getUsage: async (base: string, managementKey?: string): Promise<UsagePayload> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoUsagePayload() as UsagePayload;
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.get<UsagePayload>(buildUrl(base, '/v0/management/usage'), {
         timeout: USAGE_SERVICE_TIMEOUT_MS,
@@ -1505,6 +1673,10 @@ export const usageServiceApi = {
   },
 
   getModelPrices: async (base: string, managementKey?: string): Promise<ModelPricesResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoModelPrices();
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.get<ModelPricesResponse>(
         buildUrl(base, '/v0/management/model-prices'),
@@ -1522,6 +1694,10 @@ export const usageServiceApi = {
     prices: Record<string, ModelPrice>,
     managementKey?: string
   ): Promise<ModelPricesResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return { prices };
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.put<ModelPricesResponse>(
         buildUrl(base, '/v0/management/model-prices'),
@@ -1539,6 +1715,10 @@ export const usageServiceApi = {
     base: string,
     managementKey?: string
   ): Promise<ApiKeyAliasesResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoApiKeyAliases();
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.get<ApiKeyAliasesResponse>(
         buildUrl(base, '/v0/management/api-key-aliases'),
@@ -1558,6 +1738,10 @@ export const usageServiceApi = {
     activeApiKeyHashes?: string[],
     allowOrphanAliasCleanup?: boolean
   ): Promise<ApiKeyAliasesResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return { items };
+    }
+
     return withUsageServiceError(async () => {
       const body: {
         items: ApiKeyAlias[];
@@ -1587,6 +1771,10 @@ export const usageServiceApi = {
     apiKeyHash: string,
     managementKey?: string
   ): Promise<void> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return;
+    }
+
     await withUsageServiceError(async () => {
       await axios.delete(
         buildUrl(base, `/v0/management/api-key-aliases/${encodeURIComponent(apiKeyHash)}`),
@@ -1604,6 +1792,10 @@ export const usageServiceApi = {
     status = 'pending',
     limit = 100
   ): Promise<AccountActionCandidatesResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoAccountActionCandidatesResponse(status, limit);
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.get<AccountActionCandidatesResponse>(
         buildUrl(base, '/v0/management/account-action-candidates'),
@@ -1622,6 +1814,10 @@ export const usageServiceApi = {
     managementKey: string | undefined,
     id: number
   ): Promise<AccountActionCandidateResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoAccountActionCandidateResponse(id, 'ignored');
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.post<AccountActionCandidateResponse>(
         buildUrl(
@@ -1643,6 +1839,10 @@ export const usageServiceApi = {
     managementKey: string | undefined,
     id: number
   ): Promise<AccountActionCandidateResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoAccountActionCandidateResponse(id, 'resolved');
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.post<AccountActionCandidateResponse>(
         buildUrl(
@@ -1664,6 +1864,10 @@ export const usageServiceApi = {
     managementKey: string | undefined,
     id: number
   ): Promise<AccountActionCandidateResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoAccountActionCandidateResponse(id, 'resolved');
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.post<AccountActionCandidateResponse>(
         buildUrl(
@@ -1685,6 +1889,10 @@ export const usageServiceApi = {
     managementKey: string | undefined,
     id: number
   ): Promise<AccountActionCandidateResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoAccountActionCandidateResponse(id, 'deleted');
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.delete<AccountActionCandidateResponse>(
         buildUrl(
@@ -1705,6 +1913,10 @@ export const usageServiceApi = {
     managementKey?: string,
     models?: string[]
   ): Promise<ModelPriceSyncResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoModelPriceSyncResponse(models);
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.post<ModelPriceSyncResponse>(
         buildUrl(base, '/v0/management/model-prices/sync'),
@@ -1719,6 +1931,15 @@ export const usageServiceApi = {
   },
 
   exportUsage: async (base: string, managementKey?: string): Promise<UsageExportResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return {
+        blob: new Blob(['{"demo":true,"event":"usage-export"}\n'], {
+          type: 'application/jsonl',
+        }),
+        filename: 'demo-usage-events.jsonl',
+      };
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.get<Blob>(buildUrl(base, '/v0/management/usage/export'), {
         timeout: USAGE_SERVICE_TRANSFER_TIMEOUT_MS,
@@ -1738,6 +1959,10 @@ export const usageServiceApi = {
     payload: Blob | string,
     managementKey?: string
   ): Promise<UsageImportResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return { format: 'jsonl', added: 12, skipped: 0, total: 12, failed: 0 };
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.post<UsageImportResponse>(
         buildUrl(base, '/v0/management/usage/import'),
@@ -1758,6 +1983,10 @@ export const dashboardApi = {
     managementKey: string | undefined,
     params: DashboardSummaryParams
   ): Promise<DashboardSummaryResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoDashboardSummary();
+    }
+
     return withUsageServiceError(async () => {
       const query: Record<string, number> = {
         today_start_ms: params.todayStartMs,
@@ -1785,6 +2014,10 @@ export const monitoringAnalyticsApi = {
     managementKey: string | undefined,
     params: { days?: number; limit?: number } = {}
   ): Promise<UsageHeaderSnapshotsResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoHeaderSnapshots();
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.get<UsageHeaderSnapshotsResponse>(
         buildUrl(base, '/v0/management/monitoring/header-snapshots'),
@@ -1802,6 +2035,10 @@ export const monitoringAnalyticsApi = {
     managementKey: string | undefined,
     request: MonitoringAnalyticsRequest
   ): Promise<MonitoringAnalyticsResponse> => {
+    if (__DEMO_SITE__ && isDemoMode()) {
+      return getDemoMonitoringAnalytics(request);
+    }
+
     return withUsageServiceError(async () => {
       const response = await axios.post<MonitoringAnalyticsResponse>(
         buildUrl(base, '/v0/management/monitoring/analytics'),

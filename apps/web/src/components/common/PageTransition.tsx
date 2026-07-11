@@ -109,21 +109,15 @@ export function PageTransition({
     if (nextVariant === 'none') {
       const nextCurrent: Layer = { key: location.key, location, status: 'current' };
       nextLayersRef.current = null;
-      let cancelled = false;
-      queueMicrotask(() => {
-        if (cancelled) return;
-        setLayers((prev) => {
-          const previousCurrent = prev.find((layer) => layer.status === 'current');
-          if (previousCurrent?.key === nextCurrent.key) return prev;
-          return [nextCurrent];
-        });
+      setLayers((prev) => {
+        const previousCurrent = prev.find((layer) => layer.status === 'current');
+        if (previousCurrent?.key === nextCurrent.key) return prev;
+        return [nextCurrent];
       });
       if (scrollContainer && exitScrollOffset !== enterScrollOffset) {
         scrollContainer.scrollTo({ top: enterScrollOffset, left: 0, behavior: 'auto' });
       }
-      return () => {
-        cancelled = true;
-      };
+      return;
     }
 
     let nextDirection: TransitionDirection =

@@ -55,7 +55,9 @@ import {
   getHeaderSnapshotUsedPercent,
   hasUsageHeaderQuotaSignal,
 } from '@/utils/usageHeaderSnapshots';
+import { formatXaiBillingDiagnostics } from '@/utils/quota/xaiPresentation';
 import {
+  calculateCacheHitRateFromTotals,
   formatCompactNumber,
   formatDurationMs,
   formatUsd,
@@ -166,12 +168,7 @@ export const buildMonitoringInitialStateFromQuery = (
   const headerTraceId = params.get('header_trace_id')?.trim();
   const hasRange = fromMs !== null && toMs !== null && fromMs < toMs;
   const hasStructuredScopeFilter = Boolean(
-    authFile ||
-    projectId ||
-    requestType ||
-    minLatencyMs ||
-    cacheStatus ||
-    headerTraceId
+    authFile || projectId || requestType || minLatencyMs || cacheStatus || headerTraceId
   );
 
   return {
@@ -636,12 +633,17 @@ export const buildSecondarySummaryCards = (
 ): SummaryCardProps[] => {
   const totalCacheTokens =
     summary.cachedTokens + summary.cacheCreationTokens + summary.cacheReadTokens;
-  const cacheHitTokens = summary.cachedTokens + summary.cacheReadTokens;
-  const inputSideTokens =
+  const fallbackCacheInputTokens =
     Math.max(summary.inputTokens, summary.cachedTokens) +
     summary.cacheReadTokens +
     summary.cacheCreationTokens;
-  const cacheHitRate = inputSideTokens > 0 ? cacheHitTokens / inputSideTokens : 0;
+  const cacheHitRate =
+    summary.cacheHitRate === undefined
+      ? calculateCacheHitRateFromTotals(
+          summary.cachedTokens + summary.cacheReadTokens,
+          fallbackCacheInputTokens
+        )
+      : calculateCacheHitRateFromTotals(summary.cacheHitRate, 1);
 
   return [
     {
@@ -974,7 +976,10 @@ export const mergeObservedAccountQuotaState = (
   observedEntries.forEach((observedEntry) => {
     if (!targetKeys.has(observedEntry.key) || activeKeys.has(observedEntry.key)) return;
 
-    if (state.status === 'error' && !isObservedAccountQuotaNewerThanFailure(state.failedAtMs, observedEntry)) {
+    if (
+      state.status === 'error' &&
+      !isObservedAccountQuotaNewerThanFailure(state.failedAtMs, observedEntry)
+    ) {
       if (!state.error) return;
       entries.push({ ...observedEntry, error: state.error, failedAtMs: state.failedAtMs });
     } else {
@@ -1076,7 +1081,9 @@ const buildXaiAccountQuotaWindows = (
   const windows: AccountQuotaWindow[] = [];
   const hasWeeklyData =
     billing.periodType === 'weekly' &&
-    (billing.usagePercent !== null || Boolean(billing.periodEnd) || billing.productUsage.length > 0);
+    (billing.usagePercent !== null ||
+      Boolean(billing.periodEnd) ||
+      billing.productUsage.length > 0);
   const hasMonthlyData =
     billing.monthlyLimitCents !== null ||
     billing.usedCents !== null ||
@@ -1316,13 +1323,24 @@ export const requestAccountQuota = async (
     }
     case 'xai': {
       const billing = await fetchXaiQuota(target.file, t);
-      const metaLabels =
-        billing.onDemandCapCents !== null
-          ? [`${t('xai_quota.on_demand_cap')}: ${formatXaiCurrency(billing.onDemandCapCents)}`]
-          : [];
+      const metaLabels: string[] = [];
+      if (billing.officialApiHealth) {
+        metaLabels.push(t('xai_quota.official_api_health'));
+      } else if (billing.onDemandCapCents !== null) {
+        metaLabels.push(
+          `${t('xai_quota.on_demand_cap')}: ${formatXaiCurrency(billing.onDemandCapCents)}`
+        );
+      }
+      if (billing.partial) {
+        metaLabels.push(
+          t('xai_quota.partial_data', {
+            details: formatXaiBillingDiagnostics(billing.diagnostics, t),
+          })
+        );
+      }
       return stampAccountQuotaFetchTime({
         ...buildBaseAccountQuotaEntry(target, t, metaLabels),
-        windows: buildXaiAccountQuotaWindows(billing, t),
+        windows: billing.officialApiHealth ? [] : buildXaiAccountQuotaWindows(billing, t),
       });
     }
     case 'codex':

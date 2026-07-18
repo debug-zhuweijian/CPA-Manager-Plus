@@ -14,6 +14,7 @@ import {
   resolveMonitoringDisplayEventItems,
   resolveMonitoringPresentationSnapshot,
   rememberSharedMonitoringPresentationSnapshotForTest,
+  withoutMonitoringSnapshotEvents,
   type MonitoringEventRow,
   type MonitoringPresentationSnapshot,
 } from './useMonitoringData';
@@ -99,6 +100,7 @@ const createPresentationSnapshot = (id: string): MonitoringPresentationSnapshot 
     filteredRows: [row],
     eventsHasMore: id.includes('more'),
     eventsLoadingMore: false,
+    eventsRetentionLimited: false,
     eventsTotalCount: 1,
     eventsLoadedCount: 1,
     lastRefreshedAt: new Date(1_768_759_000_000),
@@ -225,7 +227,12 @@ describe('analytics aggregate row adapters', () => {
       authFileMap,
       sourceInfoMap,
       channelByAuthIndex,
-      new Map([['client-key-hash', { label: 'Team Key', masked: 'sk********ey' }]])
+      new Map([
+        [
+          'client-key-hash',
+          { label: 'Team Key', masked: 'sk********ey', copyValue: 'sk-client-key-original' },
+        ],
+      ])
     );
 
     expect(rows).toHaveLength(1);
@@ -233,6 +240,7 @@ describe('analytics aggregate row adapters', () => {
       apiKeyHash: 'client-key-hash',
       apiKeyLabel: 'Team Key',
       apiKeyMasked: 'sk********ey',
+      apiKeyCopyValue: 'sk-client-key-original',
       totalCalls: 3,
       failureCalls: 1,
       totalTokens: 43,
@@ -286,6 +294,7 @@ describe('buildApiKeyDisplayMap', () => {
 
     expect(map.get(apiKeyHash)?.label).toBe('Team A');
     expect(map.get(apiKeyHash)?.masked).toMatch(/^sk/);
+    expect(map.get(apiKeyHash)?.copyValue).toBe(apiKey);
   });
 
   it('masks key-like aliases before display', () => {
@@ -304,32 +313,38 @@ describe('buildApiKeyDisplayMap', () => {
 
 describe('buildApiKeyRows', () => {
   it('groups usage by client api key and aggregates model spend', () => {
-    const rows = buildApiKeyRows([
-      createMonitoringEventRow({
-        id: 'row-1',
-        apiKeyHash: 'hash-a',
-        apiKeyLabel: 'Team A',
-        apiKeyMasked: 'sk********aa',
-        model: 'gpt-4.1',
-        totalTokens: 18,
-        totalCost: 0.12,
-      }),
-      createMonitoringEventRow({
-        id: 'row-2',
-        apiKeyHash: 'hash-a',
-        apiKeyLabel: 'Team A',
-        apiKeyMasked: 'sk********aa',
-        model: 'gpt-4.1',
-        failed: true,
-        totalTokens: 7,
-        totalCost: 0.03,
-      }),
-    ]);
+    const rows = buildApiKeyRows(
+      [
+        createMonitoringEventRow({
+          id: 'row-1',
+          apiKeyHash: 'hash-a',
+          apiKeyLabel: 'Team A',
+          apiKeyMasked: 'sk********aa',
+          model: 'gpt-4.1',
+          totalTokens: 18,
+          totalCost: 0.12,
+        }),
+        createMonitoringEventRow({
+          id: 'row-2',
+          apiKeyHash: 'hash-a',
+          apiKeyLabel: 'Team A',
+          apiKeyMasked: 'sk********aa',
+          model: 'gpt-4.1',
+          failed: true,
+          totalTokens: 7,
+          totalCost: 0.03,
+        }),
+      ],
+      new Map([
+        ['hash-a', { label: 'Team A', masked: 'sk********aa', copyValue: 'sk-original-aa' }],
+      ])
+    );
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       apiKeyHash: 'hash-a',
       apiKeyLabel: 'Team A',
+      apiKeyCopyValue: 'sk-original-aa',
       totalCalls: 2,
       successCalls: 1,
       failureCalls: 1,
@@ -474,6 +489,27 @@ describe('buildScopeFilteredRows', () => {
       )
     ).toEqual(['slow-cache-miss']);
   });
+
+  it('clamps local summary cache rates and respects resolved GPT-5.6 aliases', () => {
+    expect(
+      buildMonitoringSummary([
+        createMonitoringEventRow({ inputTokens: 10, cachedTokens: 100 }),
+      ]).cacheHitRate
+    ).toBe(1);
+
+    expect(
+      buildMonitoringSummary([
+        createMonitoringEventRow({
+          model: 'internal-fast',
+          resolvedModel: 'openai/gpt-5.6-sol',
+          inputTokens: 152_600,
+          cachedTokens: 0,
+          cacheReadTokens: 151_000,
+          cacheCreationTokens: 1_000,
+        }),
+      ]).cacheHitRate
+    ).toBeCloseTo(151_000 / 152_600, 6);
+  });
 });
 
 describe('buildMonitoringEventsScopeKey', () => {
@@ -563,6 +599,34 @@ describe('mergeMonitoringEventsPageItems', () => {
     expect(
       mergeMonitoringEventsPageItems(previous, nextPage, null).map((item) => item.event_hash)
     ).toEqual(['event-3', 'event-2', 'event-1']);
+  });
+
+  it('keeps only the newest 2000 deduplicated events', () => {
+    const previous = Array.from({ length: 2_000 }, (_, index) =>
+      createAnalyticsEvent(`old-${index}`, 10_000 - index)
+    );
+    const nextPage = Array.from({ length: 500 }, (_, index) =>
+      createAnalyticsEvent(`new-${index}`, 20_000 - index)
+    );
+
+    const merged = mergeMonitoringEventsPageItems(previous, nextPage, null);
+    expect(merged).toHaveLength(2_000);
+    expect(merged[0]?.event_hash).toBe('new-0');
+    expect(merged[499]?.event_hash).toBe('new-499');
+    expect(merged[merged.length - 1]?.event_hash).toBe('old-1499');
+  });
+});
+
+describe('withoutMonitoringSnapshotEvents', () => {
+  it('keeps aggregate presentation data without retaining event rows', () => {
+    const snapshot = createPresentationSnapshot('cached');
+    const cached = withoutMonitoringSnapshotEvents(snapshot);
+
+    expect(cached.summary).toBe(snapshot.summary);
+    expect(cached.filteredRows).toEqual([]);
+    expect(cached.eventsLoadedCount).toBe(0);
+    expect(cached.eventsTotalCount).toBe(0);
+    expect(cached.eventsHasMore).toBe(false);
   });
 });
 
@@ -737,7 +801,7 @@ describe('shared monitoring presentation snapshot store', () => {
     }
 
     const store = readSharedMonitoringPresentationSnapshotStoreForTest();
-    expect(store.cachedSnapshots.size).toBe(24);
+    expect(store.cachedSnapshots.size).toBe(4);
     expect(store.cachedSnapshots.has('scope-0')).toBe(false);
     expect(store.cachedSnapshots.has('scope-29')).toBe(true);
   });

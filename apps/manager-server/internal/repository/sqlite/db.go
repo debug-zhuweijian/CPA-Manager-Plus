@@ -2,8 +2,10 @@ package sqlite
 
 import (
 	"database/sql"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -13,19 +15,20 @@ func Open(path string) (*sql.DB, error) {
 }
 
 func OpenWithOptions(options Options) (*sql.DB, error) {
-	if err := os.MkdirAll(filepath.Dir(options.Path), 0o755); err != nil {
-		return nil, err
-	}
-	db, err := sql.Open("sqlite", options.Path)
+	dbPath, err := filepath.Abs(options.Path)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	if err := configureConnection(db); err != nil {
-		_ = db.Close()
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		return nil, err
 	}
+	db, err := sql.Open("sqlite", dataSourceName(dbPath))
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(options.maxOpenConns())
+	db.SetMaxIdleConns(options.maxIdleConns())
+	db.SetConnMaxIdleTime(options.connMaxIdleTime())
 	if err := Migrate(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -33,17 +36,19 @@ func OpenWithOptions(options Options) (*sql.DB, error) {
 	return db, nil
 }
 
-func configureConnection(db *sql.DB) error {
-	pragmas := []string{
-		"pragma busy_timeout = 5000",
-		"pragma journal_mode = wal",
-		"pragma synchronous = normal",
-		"pragma foreign_keys = on",
+func dataSourceName(path string) string {
+	uriPath := filepath.ToSlash(path)
+	if !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
 	}
-	for _, pragma := range pragmas {
-		if _, err := db.Exec(pragma); err != nil {
-			return err
-		}
+	dsn := &url.URL{
+		Scheme: "file",
+		Path:   uriPath,
 	}
-	return nil
+	query := dsn.Query()
+	query.Add("_pragma", "busy_timeout(5000)")
+	query.Add("_pragma", "foreign_keys(1)")
+	query.Add("_pragma", "synchronous(FULL)")
+	dsn.RawQuery = query.Encode()
+	return dsn.String()
 }

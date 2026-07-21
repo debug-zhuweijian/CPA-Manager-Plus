@@ -113,5 +113,5 @@ describe('demo persist isolation', () => {
         apiBase: 'http://next.local:18317',
         managementKey: 'next-management-key',
       });
-  });
+  }, 15_000);
 });

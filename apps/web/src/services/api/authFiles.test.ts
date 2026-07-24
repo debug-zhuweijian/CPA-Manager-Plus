@@ -97,6 +97,16 @@ describe('authFilesApi OAuth model alias normalization', () => {
   });
 });
 
+describe('authFilesApi OAuth excluded model normalization', () => {
+  it('treats a wrapped null value as an empty provider map', async () => {
+    mocks.get.mockResolvedValue({
+      'oauth-excluded-models': null,
+    });
+
+    await expect(authFilesApi.getOauthExcludedModels()).resolves.toEqual({});
+  });
+});
+
 describe('authFilesApi list normalization', () => {
   it('preserves same-name auth file rows when authIndex differs', async () => {
     mocks.get.mockResolvedValue({

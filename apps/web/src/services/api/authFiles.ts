@@ -536,7 +536,9 @@ const normalizeOauthExcludedModels = (payload: unknown): Record<string, string[]
   if (!payload || typeof payload !== 'object') return {};
 
   const record = payload as Record<string, unknown>;
-  const source = record['oauth-excluded-models'] ?? record.items ?? payload;
+  const source = Object.prototype.hasOwnProperty.call(record, 'oauth-excluded-models')
+    ? record['oauth-excluded-models']
+    : (record.items ?? payload);
   if (!source || typeof source !== 'object') return {};
 
   const result: Record<string, string[]> = {};

@@ -57,6 +57,14 @@ func newCompatHandler(t *testing.T, cfg config.Config, setup *store.Setup) (http
 	return New(cfg, db, manager).Handler(), db
 }
 
+type staticDatabaseMaintenanceStatus struct {
+	snapshot sqliterepo.WALMaintenanceSnapshot
+}
+
+func (s staticDatabaseMaintenanceStatus) Snapshot() sqliterepo.WALMaintenanceSnapshot {
+	return s.snapshot
+}
+
 func TestServerCompatHealthInfoAndPanel(t *testing.T) {
 	cfg := testutil.NewConfig(t)
 	handler, _ := newCompatHandler(t, cfg, nil)
@@ -410,6 +418,50 @@ func TestServerCompatStatusAuthAndCounts(t *testing.T) {
 	}
 }
 
+func TestServerCompatStatusIncludesDatabaseMaintenanceSnapshot(t *testing.T) {
+	cfg := testutil.NewConfig(t)
+	db := testutil.NewStore(t, cfg)
+	manager := collector.NewManager(cfg, db)
+	server := New(cfg, db, manager)
+	server.AppContext().DatabaseMaintenance = staticDatabaseMaintenanceStatus{
+		snapshot: sqliterepo.WALMaintenanceSnapshot{
+			DatabaseBytes:         1024,
+			WALBytes:              2048,
+			SHMBytes:              32,
+			TotalBytes:            3104,
+			JournalSizeLimitBytes: sqliterepo.WALJournalSizeLimitBytes,
+			Checkpoint: sqliterepo.WALCheckpointSnapshot{
+				Mode:               sqliterepo.WALCheckpointModePassive,
+				Busy:               1,
+				LogFrames:          20,
+				CheckpointedFrames: 12,
+				ExecutedAtMS:       1_786_000_000_000,
+				DurationMS:         250,
+				Error:              "checkpoint timed out",
+			},
+		},
+	}
+
+	rr := testutil.Request(t, server.Handler(), http.MethodGet, "/status", "", testutil.AdminKey)
+	testutil.RequireStatus(t, rr, http.StatusOK)
+	var response struct {
+		Database sqliterepo.WALMaintenanceSnapshot `json:"database"`
+	}
+	testutil.DecodeJSON(t, rr, &response)
+	if response.Database.DatabaseBytes != 1024 ||
+		response.Database.WALBytes != 2048 ||
+		response.Database.SHMBytes != 32 ||
+		response.Database.TotalBytes != 3104 ||
+		response.Database.Checkpoint.Mode != sqliterepo.WALCheckpointModePassive ||
+		response.Database.Checkpoint.Busy != 1 ||
+		response.Database.Checkpoint.LogFrames != 20 ||
+		response.Database.Checkpoint.CheckpointedFrames != 12 ||
+		response.Database.Checkpoint.DurationMS != 250 ||
+		response.Database.Checkpoint.Error != "checkpoint timed out" {
+		t.Fatalf("database maintenance status = %#v", response.Database)
+	}
+}
+
 func TestServerCompatUsageRoutes(t *testing.T) {
 	cpa := testutil.NewCPAMock(t)
 	setup := &store.Setup{CPAUpstreamURL: cpa.URL(), ManagementKey: "management-key", Queue: "usage", PopSide: "right"}
@@ -758,7 +810,7 @@ func TestServerCompatPluginProxyRoutes(t *testing.T) {
 		body              string
 	}
 
-	observed := make(chan observedRequest, 9)
+	observed := make(chan observedRequest, 12)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		observed <- observedRequest{
@@ -957,7 +1009,9 @@ func TestServerCompatPluginProxyRoutes(t *testing.T) {
 	)
 	testutil.RequireStatus(t, resourceTraceRR, http.StatusMethodNotAllowed)
 
-	resourceRR := requestWithHeaders(
+	// Public plugin resources may remain reachable, but an unauthenticated
+	// caller must never be elevated to the saved CPA management key.
+	resourceNoAuthRR := requestWithHeaders(
 		http.MethodGet,
 		"/v0/resource/plugins/codex-invite/invite",
 		"",
@@ -966,12 +1020,54 @@ func TestServerCompatPluginProxyRoutes(t *testing.T) {
 			"X-Codex-Invite-Origin": "http://localhost:18317",
 		},
 	)
-	testutil.RequireStatus(t, resourceRR, http.StatusOK)
+	testutil.RequireStatus(t, resourceNoAuthRR, http.StatusOK)
 	assertObserved("/v0/resource/plugins/codex-invite/invite", observedRequest{
 		method:            http.MethodGet,
 		path:              "/v0/resource/plugins/codex-invite/invite",
-		authorization:     "Bearer management-key",
 		codexInviteOrigin: upstream.URL,
+	})
+
+	resourceCallerAuthRR := requestWithHeaders(
+		http.MethodGet,
+		"/v0/resource/plugins/codex-invite/invite",
+		"",
+		"plugin-management-key",
+		nil,
+	)
+	testutil.RequireStatus(t, resourceCallerAuthRR, http.StatusOK)
+	assertObserved("/v0/resource/plugins/codex-invite/invite", observedRequest{
+		method:        http.MethodGet,
+		path:          "/v0/resource/plugins/codex-invite/invite",
+		authorization: "Bearer plugin-management-key",
+	})
+
+	resourceAdminAuthRR := testutil.Request(
+		t,
+		handler,
+		http.MethodGet,
+		"/v0/resource/plugins/codex-invite/invite",
+		"",
+		testutil.AdminKey,
+	)
+	testutil.RequireStatus(t, resourceAdminAuthRR, http.StatusOK)
+	assertObserved("/v0/resource/plugins/codex-invite/invite", observedRequest{
+		method:        http.MethodGet,
+		path:          "/v0/resource/plugins/codex-invite/invite",
+		authorization: "Bearer management-key",
+	})
+
+	resourceHeadNoAuthRR := testutil.Request(
+		t,
+		handler,
+		http.MethodHead,
+		"/v0/resource/plugins/codex-invite/invite",
+		"",
+		"",
+	)
+	testutil.RequireStatus(t, resourceHeadNoAuthRR, http.StatusOK)
+	assertObserved("/v0/resource/plugins/codex-invite/invite", observedRequest{
+		method: http.MethodHead,
+		path:   "/v0/resource/plugins/codex-invite/invite",
 	})
 }
 

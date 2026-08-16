@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/model"
@@ -19,6 +20,8 @@ import (
 	sqliterepo "github.com/seakee/cpa-manager-plus/apps/manager-server/internal/repository/sqlite"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/repository/usageaggregate"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/repository/usageevent"
+	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/repository/usagemonitoring"
+	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/repository/usagepricing"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/repository/usagerollup"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/security"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/usage"
@@ -40,6 +43,8 @@ type CodexInspectionDisableOwnership = model.CodexInspectionDisableOwnership
 type CodexInspectionLease = model.CodexInspectionLease
 type InsertResult = model.InsertResult
 type ModelPrice = model.ModelPrice
+type ModelPriceContextTier = model.ModelPriceContextTier
+type ModelPriceServiceTier = model.ModelPriceServiceTier
 type ModelPriceSyncResult = model.ModelPriceSyncResult
 type ModelUsageStat = model.ModelUsageStat
 type ModelUsageSummary = model.ModelUsageSummary
@@ -86,9 +91,34 @@ type UsageHourlyAggregateState = usageaggregate.State
 type UsageHourlyAggregateCatchUpResult = usageaggregate.CatchUpResult
 type UsageHourlyAggregateFilter = usageaggregate.Filter
 type UsageHourlyAggregateRow = usageaggregate.Row
+type UsagePricingState = usagepricing.State
+type UsagePricingCatchUpResult = usagepricing.CatchUpResult
+type UsagePricingHourlyFilter = usagepricing.HourlyFilter
+type UsagePricingHourlyRow = usagepricing.HourlyRow
+type UsagePricingAccountRow = usagepricing.AccountRow
+type UsageMonitoringState = usagemonitoring.State
+type UsageMonitoringCatchUpResult = usagemonitoring.CatchUpResult
+
+type UsageHourlyPricingSnapshot struct {
+	AggregateRows      []UsageHourlyAggregateRow
+	AggregateState     UsageHourlyAggregateState
+	AggregateAvailable bool
+	PricingRows        []UsagePricingHourlyRow
+	PricingState       UsagePricingState
+	PricingAvailable   bool
+	Prices             map[string]ModelPrice
+}
+
+type UsagePricingAccountSnapshot struct {
+	Rows      []UsagePricingAccountRow
+	State     UsagePricingState
+	Available bool
+	Prices    map[string]ModelPrice
+}
 
 type Store struct {
-	db *sql.DB
+	db            *sql.DB
+	modelPricesMu sync.RWMutex
 
 	Settings         setting.Repository
 	UsageEvents      usageevent.Repository
@@ -100,6 +130,8 @@ type Store struct {
 	DataMigrations   datamigration.Repository
 	QuotaCooldowns   quotacooldown.Repository
 	UsageAggregates  usageaggregate.Repository
+	UsagePricing     usagepricing.Repository
+	UsageMonitoring  usagemonitoring.Repository
 	UsageRollups     usagerollup.Repository
 }
 
@@ -124,6 +156,8 @@ func New(db *sql.DB, protector ...*security.Protector) *Store {
 		DataMigrations:   datamigration.New(db),
 		QuotaCooldowns:   quotacooldown.New(db),
 		UsageAggregates:  usageaggregate.New(db),
+		UsagePricing:     usagepricing.New(db),
+		UsageMonitoring:  usagemonitoring.New(db),
 		UsageRollups:     usagerollup.New(db),
 	}
 }
@@ -184,11 +218,23 @@ func (s *Store) LoadModelPrices(ctx context.Context) (map[string]ModelPrice, err
 }
 
 func (s *Store) SaveModelPrices(ctx context.Context, prices map[string]ModelPrice) error {
+	s.modelPricesMu.Lock()
+	defer s.modelPricesMu.Unlock()
 	return s.ModelPrices.ReplaceAll(ctx, prices)
 }
 
 func (s *Store) UpsertSyncedModelPrices(ctx context.Context, prices map[string]ModelPrice) (ModelPriceSyncResult, error) {
+	s.modelPricesMu.Lock()
+	defer s.modelPricesMu.Unlock()
 	return s.ModelPrices.UpsertSynced(ctx, prices)
+}
+
+// WithModelPriceSnapshot prevents model-price mutations while a service reads
+// usage bands and applies the corresponding price book across multiple queries.
+func (s *Store) WithModelPriceSnapshot(read func() error) error {
+	s.modelPricesMu.RLock()
+	defer s.modelPricesMu.RUnlock()
+	return read()
 }
 
 func (s *Store) ModelUsageSummary(ctx context.Context, limit int) (ModelUsageSummary, error) {
@@ -323,12 +369,16 @@ func (s *Store) UpsertCodexInspectionDisableOwnership(ctx context.Context, item 
 	return s.CodexInspections.UpsertDisableOwnership(ctx, item)
 }
 
-func (s *Store) DeleteCodexInspectionDisableOwnership(ctx context.Context, fileName string) error {
-	return s.CodexInspections.DeleteDisableOwnership(ctx, fileName)
+func (s *Store) UpsertCodexInspectionDisableOwnerships(ctx context.Context, items []CodexInspectionDisableOwnership) error {
+	return s.CodexInspections.UpsertDisableOwnerships(ctx, items)
 }
 
-func (s *Store) RevokeCodexInspectionDisableOwnership(ctx context.Context, fileNames []string, clearAll bool) ([]CodexInspectionDisableOwnership, error) {
-	return s.CodexInspections.RevokeDisableOwnership(ctx, fileNames, clearAll)
+func (s *Store) DeleteCodexInspectionDisableOwnership(ctx context.Context, target model.CodexInspectionDisableOwnershipTarget) error {
+	return s.CodexInspections.DeleteDisableOwnership(ctx, target)
+}
+
+func (s *Store) RevokeCodexInspectionDisableOwnership(ctx context.Context, targets []model.CodexInspectionDisableOwnershipTarget, clearAll bool) ([]CodexInspectionDisableOwnership, error) {
+	return s.CodexInspections.RevokeDisableOwnership(ctx, targets, clearAll)
 }
 
 func (s *Store) RestoreCodexInspectionDisableOwnership(ctx context.Context, items []CodexInspectionDisableOwnership) error {
@@ -394,6 +444,165 @@ func (s *Store) UsageHourlyAggregateState(ctx context.Context) (UsageHourlyAggre
 
 func (s *Store) UsageHourlyAggregateRows(ctx context.Context, filter UsageHourlyAggregateFilter) ([]UsageHourlyAggregateRow, UsageHourlyAggregateState, bool, error) {
 	return s.UsageAggregates.LoadRows(ctx, filter)
+}
+
+func (s *Store) CatchUpUsagePricing(ctx context.Context, limit int, nowMS int64) (UsagePricingCatchUpResult, error) {
+	ready, err := s.UsageCacheAccountingMigrationReady(ctx)
+	if err != nil {
+		return UsagePricingCatchUpResult{}, err
+	}
+	if !ready {
+		return UsagePricingCatchUpResult{Pending: true}, nil
+	}
+	return s.UsagePricing.CatchUp(ctx, limit, nowMS)
+}
+
+func (s *Store) RecordUsagePricingFailure(ctx context.Context, rollupErr error, nowMS int64) error {
+	return s.UsagePricing.RecordFailure(ctx, rollupErr, nowMS)
+}
+
+func (s *Store) CatchUpUsageMonitoringStats(ctx context.Context, limit int, nowMS int64) (UsageMonitoringCatchUpResult, error) {
+	ready, err := s.UsageCacheAccountingMigrationReady(ctx)
+	if err != nil {
+		return UsageMonitoringCatchUpResult{}, err
+	}
+	if !ready {
+		return UsageMonitoringCatchUpResult{Pending: true}, nil
+	}
+	return s.UsageMonitoring.CatchUpStats(ctx, limit, nowMS)
+}
+
+func (s *Store) CatchUpUsageMonitoringProjection(ctx context.Context, limit int, nowMS int64) (UsageMonitoringCatchUpResult, error) {
+	ready, err := s.UsageCacheAccountingMigrationReady(ctx)
+	if err != nil {
+		return UsageMonitoringCatchUpResult{}, err
+	}
+	if !ready {
+		return UsageMonitoringCatchUpResult{Pending: true}, nil
+	}
+	return s.UsageMonitoring.CatchUpProjection(ctx, limit, nowMS)
+}
+
+func (s *Store) CatchUpUsageMonitoringMetadata(ctx context.Context, limit int, nowMS int64) (UsageMonitoringCatchUpResult, error) {
+	return s.UsageMonitoring.CatchUpMetadata(ctx, limit, nowMS)
+}
+
+func (s *Store) RecordUsageMonitoringFailure(ctx context.Context, rollupName string, rollupErr error, nowMS int64) error {
+	return s.UsageMonitoring.RecordFailure(ctx, rollupName, rollupErr, nowMS)
+}
+
+func (s *Store) UsageMonitoringState(ctx context.Context, rollupName string) (UsageMonitoringState, error) {
+	return s.UsageMonitoring.State(ctx, rollupName)
+}
+
+func (s *Store) UsageMonitoringAggregate(ctx context.Context, filter AnalyticsFilter) (Aggregate, UsageMonitoringState, bool, error) {
+	return s.UsageMonitoring.LoadAggregate(ctx, filter)
+}
+
+func (s *Store) UsageMonitoringModelStats(ctx context.Context, filter AnalyticsFilter) ([]ModelStat, UsageMonitoringState, bool, error) {
+	return s.UsageMonitoring.LoadModelStats(ctx, filter)
+}
+
+func (s *Store) UsageMonitoringAccountStats(ctx context.Context, filter AnalyticsFilter) ([]AccountModelStat, UsageMonitoringState, bool, error) {
+	return s.UsageMonitoring.LoadAccountStats(ctx, filter)
+}
+
+func (s *Store) UsageMonitoringAPIKeyStats(ctx context.Context, filter AnalyticsFilter) ([]APIKeyModelStat, UsageMonitoringState, bool, error) {
+	return s.UsageMonitoring.LoadAPIKeyStats(ctx, filter)
+}
+
+func (s *Store) UsageMonitoringFilterOptions(ctx context.Context, filter AnalyticsFilter) (FilterOptionValues, UsageMonitoringState, bool, error) {
+	return s.UsageMonitoring.LoadFilterOptions(ctx, filter)
+}
+
+func (s *Store) UsageMonitoringFilterSelectors(ctx context.Context, filter AnalyticsFilter) (FilterSelectorValues, UsageMonitoringState, bool, error) {
+	return s.UsageMonitoring.LoadFilterSelectors(ctx, filter)
+}
+
+func (s *Store) UsageMonitoringEventsCount(ctx context.Context, filter AnalyticsFilter) (int64, UsageMonitoringState, bool, error) {
+	return s.UsageMonitoring.LoadEventsCount(ctx, filter)
+}
+
+func (s *Store) UsageMonitoringEventsPage(ctx context.Context, filter AnalyticsFilter, beforeMS, beforeID int64, limit int) (EventsPage, UsageMonitoringState, bool, error) {
+	return s.UsageMonitoring.LoadEventsPage(ctx, filter, beforeMS, beforeID, limit)
+}
+
+func (s *Store) UsageMonitoringHeaderSnapshots(ctx context.Context, sinceMS int64, limit int) ([]HeaderSnapshot, UsageMonitoringState, bool, error) {
+	return s.UsageMonitoring.LoadHeaderSnapshots(ctx, sinceMS, limit)
+}
+
+func (s *Store) UsagePricingState(ctx context.Context) (UsagePricingState, error) {
+	return s.UsagePricing.State(ctx)
+}
+
+func (s *Store) UsagePricingHourlyRows(ctx context.Context, filter UsagePricingHourlyFilter) ([]UsagePricingHourlyRow, UsagePricingState, bool, error) {
+	return s.UsagePricing.LoadHourlyRows(ctx, filter)
+}
+
+func (s *Store) LoadUsageHourlyPricingSnapshot(
+	ctx context.Context,
+	aggregateFilter UsageHourlyAggregateFilter,
+	pricingFilter UsagePricingHourlyFilter,
+) (UsageHourlyPricingSnapshot, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return UsageHourlyPricingSnapshot{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	aggregateRows, aggregateState, aggregateAvailable, err := s.UsageAggregates.LoadRowsTx(ctx, tx, aggregateFilter)
+	if err != nil {
+		return UsageHourlyPricingSnapshot{}, err
+	}
+	pricingRows, pricingState, pricingAvailable, err := s.UsagePricing.LoadHourlyRowsTx(ctx, tx, pricingFilter)
+	if err != nil {
+		return UsageHourlyPricingSnapshot{}, err
+	}
+	prices, err := s.ModelPrices.LoadAllTx(ctx, tx)
+	if err != nil {
+		return UsageHourlyPricingSnapshot{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return UsageHourlyPricingSnapshot{}, err
+	}
+	return UsageHourlyPricingSnapshot{
+		AggregateRows:      aggregateRows,
+		AggregateState:     aggregateState,
+		AggregateAvailable: aggregateAvailable,
+		PricingRows:        pricingRows,
+		PricingState:       pricingState,
+		PricingAvailable:   pricingAvailable,
+		Prices:             prices,
+	}, nil
+}
+
+func (s *Store) UsagePricingAccountRows(ctx context.Context, accountKeys []string) ([]UsagePricingAccountRow, UsagePricingState, bool, error) {
+	return s.UsagePricing.LoadAccountRows(ctx, accountKeys)
+}
+
+func (s *Store) LoadUsagePricingAccountSnapshot(ctx context.Context, accountKeys []string) (UsagePricingAccountSnapshot, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return UsagePricingAccountSnapshot{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, state, available, err := s.UsagePricing.LoadAccountRowsTx(ctx, tx, accountKeys)
+	if err != nil {
+		return UsagePricingAccountSnapshot{}, err
+	}
+	prices, err := s.ModelPrices.LoadAllTx(ctx, tx)
+	if err != nil {
+		return UsagePricingAccountSnapshot{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return UsagePricingAccountSnapshot{}, err
+	}
+	return UsagePricingAccountSnapshot{
+		Rows:      rows,
+		State:     state,
+		Available: available,
+		Prices:    prices,
+	}, nil
 }
 
 func (s *Store) CatchUpAccountHistoryRollups(ctx context.Context, limit int, nowMS int64) (UsageRollupCatchUpResult, error) {

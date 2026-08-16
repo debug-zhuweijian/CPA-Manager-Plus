@@ -58,7 +58,7 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, err)
 		return
 	}
-	response.JSON(w, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"service":     h.App.ServiceID,
 		"version":     buildinfo.Version,
 		"commit":      buildinfo.Commit,
@@ -78,5 +78,9 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 			UpdatedAtMS:   migration.UpdatedAtMS,
 			FinishedAtMS:  migration.FinishedAtMS,
 		},
-	})
+	}
+	if h.App.DatabaseMaintenance != nil {
+		payload["database"] = h.App.DatabaseMaintenance.Snapshot()
+	}
+	response.JSON(w, http.StatusOK, payload)
 }

@@ -981,6 +981,107 @@ func TestAnalyticsPricesPriorityAndDefaultServiceTiersSeparately(t *testing.T) {
 	assertCost("api key model stats", resp.APIKeyStats[0].Models[0].Cost)
 }
 
+func TestAnalyticsFilteredPricingUsesStrictHighestContextTier(t *testing.T) {
+	db := newMonitoringTestStore(t)
+	ctx := context.Background()
+	fromMS := int64(1_800_010_000_000)
+	toMS := fromMS + time.Hour.Milliseconds()
+
+	if err := db.SaveModelPrices(ctx, map[string]store.ModelPrice{
+		"tiered-resolved": {
+			Prompt:     10,
+			Completion: 4,
+			ContextTiers: []store.ModelPriceContextTier{
+				{
+					ThresholdTokens:  100_000,
+					Prompt:           20,
+					PromptConfigured: true,
+				},
+				{
+					ThresholdTokens:      200_000,
+					Prompt:               0,
+					Completion:           8,
+					PromptConfigured:     true,
+					CompletionConfigured: true,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("save prices: %v", err)
+	}
+
+	events := []usage.Event{
+		monitoringEvent("filtered-context-exact", fromMS+1_000, "tiered-alias", "auth-tiered", "source-tiered", false, 100_000, 100_000, 0, 0, 200_000, nil),
+		monitoringEvent("filtered-context-first", fromMS+2_000, "tiered-alias", "auth-tiered", "source-tiered", false, 100_001, 100_000, 0, 0, 200_001, nil),
+		monitoringEvent("filtered-context-highest", fromMS+3_000, "tiered-alias", "auth-tiered", "source-tiered", false, 200_001, 100_000, 0, 0, 300_001, nil),
+		monitoringEvent("filtered-context-excluded", fromMS+4_000, "tiered-alias", "auth-other", "source-other", false, 1_000_000, 0, 0, 0, 1_000_000, nil),
+	}
+	for index := range events {
+		events[index].ResolvedModel = "tiered-resolved"
+		events[index].AccountSnapshot = "tier-team@example.com"
+		events[index].AuthLabelSnapshot = "Tier Team"
+		events[index].APIKeyHash = "tier-client-key"
+	}
+	if _, err := db.InsertEvents(ctx, events); err != nil {
+		t.Fatalf("insert events: %v", err)
+	}
+
+	resp, err := New(db, true).Analytics(ctx, Request{
+		FromMS: fromMS,
+		ToMS:   toMS,
+		Filters: Filters{
+			AuthIndices: []string{"auth-tiered"},
+		},
+		Include: Include{
+			Summary:      true,
+			Timeline:     true,
+			ModelShare:   true,
+			ModelStats:   true,
+			ChannelShare: true,
+			AccountStats: true,
+			APIKeyStats:  true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("filtered analytics: %v", err)
+	}
+
+	const wantCost = 4.60002
+	assertCost := func(name string, got float64) {
+		t.Helper()
+		if math.Abs(got-wantCost) > 0.000001 {
+			t.Fatalf("%s cost = %v, want %v", name, got, wantCost)
+		}
+	}
+	if resp.Summary == nil || resp.Summary.TotalCalls != 3 {
+		t.Fatalf("summary = %#v", resp.Summary)
+	}
+	assertCost("summary", resp.Summary.TotalCost)
+	if len(resp.Timeline) != 1 || resp.Timeline[0].Calls != 3 {
+		t.Fatalf("timeline = %#v", resp.Timeline)
+	}
+	assertCost("timeline", resp.Timeline[0].Cost)
+	if len(resp.ModelStats) != 1 || resp.ModelStats[0].Calls != 3 || len(resp.ModelShare) != 1 {
+		t.Fatalf("model rows = %#v / %#v", resp.ModelStats, resp.ModelShare)
+	}
+	assertCost("model stats", resp.ModelStats[0].Cost)
+	assertCost("model share", resp.ModelShare[0].Cost)
+	if len(resp.ChannelShare) != 1 || resp.ChannelShare[0].AuthIndex != "auth-tiered" {
+		t.Fatalf("channel share = %#v", resp.ChannelShare)
+	}
+	assertCost("channel share", resp.ChannelShare[0].Cost)
+	if len(resp.AccountStats) != 1 || len(resp.AccountStats[0].Models) != 1 {
+		t.Fatalf("account stats = %#v", resp.AccountStats)
+	}
+	assertCost("account stats", resp.AccountStats[0].Cost)
+	assertCost("account model stats", resp.AccountStats[0].Models[0].Cost)
+	if len(resp.APIKeyStats) != 1 || len(resp.APIKeyStats[0].Models) != 1 {
+		t.Fatalf("api key stats = %#v", resp.APIKeyStats)
+	}
+	assertCost("api key stats", resp.APIKeyStats[0].Cost)
+	assertCost("api key model stats", resp.APIKeyStats[0].Models[0].Cost)
+}
+
 func TestAnalyticsPricesGPT56LongContextPerRequest(t *testing.T) {
 	db := newMonitoringTestStore(t)
 	ctx := context.Background()
@@ -1485,6 +1586,67 @@ func TestAnalyticsUnfilteredFullResponseKeepsFilterOptionStatsInSync(t *testing.
 		!reflect.DeepEqual(resp.FilterOptions.AccountStats, resp.AccountStats) ||
 		!reflect.DeepEqual(resp.FilterOptions.APIKeyStats, resp.APIKeyStats) {
 		t.Fatalf("filter option stats diverged from unfiltered response: options=%#v response=%#v", resp.FilterOptions, resp)
+	}
+}
+
+func TestChannelModelStatsFromAccountStatsMatchesRawAggregation(t *testing.T) {
+	db := newMonitoringTestStore(t)
+	ctx := context.Background()
+	fromMS := int64(1_778_275_000_000)
+	toMS := fromMS + 60*60*1000
+	if err := db.SaveModelPrices(ctx, map[string]store.ModelPrice{
+		"gpt-a": {Prompt: 1},
+		"gpt-b": {Prompt: 2},
+	}); err != nil {
+		t.Fatalf("save model prices: %v", err)
+	}
+
+	firstLatencyMS := int64(1)
+	secondLatencyMS := int64(2)
+	thirdLatencyMS := int64(10)
+	first := monitoringEvent("channel-account-a", fromMS+1_000, "gpt-a", "auth-shared", "source-a", false, 10, 5, 0, 0, 15, &firstLatencyMS)
+	first.AccountSnapshot = "alice@example.com"
+	first.AuthLabelSnapshot = "Alice"
+	first.Provider = "z-provider"
+	first.AuthProviderSnapshot = ""
+	second := monitoringEvent("channel-account-b", fromMS+2_000, "gpt-a", "auth-shared", "source-b", true, 20, 10, 0, 0, 30, &secondLatencyMS)
+	second.AccountSnapshot = "bob@example.com"
+	second.AuthLabelSnapshot = "Bob"
+	second.Provider = "z-provider"
+	second.AuthProviderSnapshot = "a-snapshot"
+	third := monitoringEvent("channel-model-b", fromMS+3_000, "gpt-b", "auth-shared", "source-c", false, 30, 15, 0, 0, 45, &thirdLatencyMS)
+	third.AccountSnapshot = "carol@example.com"
+	third.AuthLabelSnapshot = "Carol"
+	third.Provider = "codex"
+	third.AuthProviderSnapshot = "codex"
+	if _, err := db.InsertEvents(ctx, []usage.Event{first, second, third}); err != nil {
+		t.Fatalf("insert events: %v", err)
+	}
+
+	filter := store.AnalyticsFilter{FromMS: fromMS, ToMS: toMS, IncludeFailed: true}
+	accountStats, err := db.AccountModelStatsWithFilter(ctx, filter)
+	if err != nil {
+		t.Fatalf("account stats: %v", err)
+	}
+	var channelALatencySumMS int64
+	for _, stat := range accountStats {
+		if stat.Model == "gpt-a" {
+			channelALatencySumMS += stat.LatencySumMS
+		}
+	}
+	if channelALatencySumMS != firstLatencyMS+secondLatencyMS {
+		t.Fatalf("gpt-a latency sum = %d, want %d", channelALatencySumMS, firstLatencyMS+secondLatencyMS)
+	}
+	want, err := db.ChannelModelStatsWithFilter(ctx, filter)
+	if err != nil {
+		t.Fatalf("channel stats: %v", err)
+	}
+	got := channelModelStatsFromAccountStats(accountStats)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("derived channel stats mismatch\nderived=%#v\nraw=%#v", got, want)
+	}
+	if len(got) != 2 || got[0].AuthProviderSnapshot != "a-snapshot" {
+		t.Fatalf("explicit provider snapshot should win channel metadata: %#v", got)
 	}
 }
 
@@ -2028,6 +2190,66 @@ func TestAccountHistoryReturnsRollupTotalsAndCost(t *testing.T) {
 	}
 }
 
+func TestAccountHistoryPricesContextTierBands(t *testing.T) {
+	db := newMonitoringTestStore(t)
+	ctx := context.Background()
+	baseMS := int64(1_700_010_000_000)
+	if err := db.SaveModelPrices(ctx, map[string]store.ModelPrice{
+		"tiered-resolved": {
+			Prompt:     10,
+			Completion: 4,
+			ContextTiers: []store.ModelPriceContextTier{
+				{
+					ThresholdTokens:  100_000,
+					Prompt:           20,
+					PromptConfigured: true,
+				},
+				{
+					ThresholdTokens:      200_000,
+					Prompt:               0,
+					Completion:           8,
+					PromptConfigured:     true,
+					CompletionConfigured: true,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("save prices: %v", err)
+	}
+
+	events := []usage.Event{
+		monitoringEvent("history-context-exact", baseMS+1_000, "tiered-alias", "auth-tiered", "source-tiered", false, 100_000, 100_000, 0, 0, 200_000, nil),
+		monitoringEvent("history-context-first", baseMS+2_000, "tiered-alias", "auth-tiered", "source-tiered", false, 100_001, 100_000, 0, 0, 200_001, nil),
+		monitoringEvent("history-context-highest", baseMS+3_000, "tiered-alias", "auth-tiered", "source-tiered", false, 200_001, 100_000, 0, 0, 300_001, nil),
+	}
+	for index := range events {
+		events[index].ResolvedModel = "tiered-resolved"
+		events[index].AccountSnapshot = "tier-history@example.com"
+		events[index].Source = "tier-history@example.com"
+	}
+	if _, err := db.InsertEvents(ctx, events); err != nil {
+		t.Fatalf("insert events: %v", err)
+	}
+
+	resp, err := New(db).AccountHistory(ctx, AccountHistoryRequest{
+		Accounts: []AccountHistoryTarget{{AccountSnapshot: "tier-history@example.com"}},
+		CatchUp:  true,
+	})
+	if err != nil {
+		t.Fatalf("account history: %v", err)
+	}
+	if resp.Checkpoint.Pending || resp.Checkpoint.LatestID != 3 || resp.Checkpoint.LastEventID != 3 || resp.Checkpoint.Processed != 3 {
+		t.Fatalf("checkpoint = %#v", resp.Checkpoint)
+	}
+	if len(resp.Items) != 1 || !resp.Items[0].Matched || resp.Items[0].TotalRequests != 3 {
+		t.Fatalf("history item = %#v", resp.Items)
+	}
+	const wantCost = 4.60002
+	if math.Abs(resp.Items[0].TotalCost-wantCost) > 0.000001 {
+		t.Fatalf("history cost = %v, want %v", resp.Items[0].TotalCost, wantCost)
+	}
+}
+
 func TestAccountHistoryEmptyTargetDoesNotMatchAnonymousBucket(t *testing.T) {
 	db := newMonitoringTestStore(t)
 	ctx := context.Background()
@@ -2368,6 +2590,15 @@ func catchUpMonitoringHourlyRollup(t *testing.T, ctx context.Context, db *store.
 		result, err := db.CatchUpUsageHourlyAggregate(ctx, 100, time.Now().UnixMilli())
 		if err != nil {
 			t.Fatalf("catch up hourly rollup: %v", err)
+		}
+		if !result.Pending {
+			break
+		}
+	}
+	for {
+		result, err := db.CatchUpUsagePricing(ctx, 100, time.Now().UnixMilli())
+		if err != nil {
+			t.Fatalf("catch up pricing rollup: %v", err)
 		}
 		if !result.Pending {
 			return

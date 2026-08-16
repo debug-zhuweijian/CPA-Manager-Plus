@@ -109,6 +109,8 @@ export function PageTransition({
     if (nextVariant === 'none') {
       const nextCurrent: Layer = { key: location.key, location, status: 'current' };
       nextLayersRef.current = null;
+      // Route-layer replacement must finish before paint to avoid flashing the previous page.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLayers((prev) => {
         const previousCurrent = prev.find((layer) => layer.status === 'current');
         if (previousCurrent?.key === nextCurrent.key) return prev;

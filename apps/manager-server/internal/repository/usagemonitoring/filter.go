@@ -79,7 +79,7 @@ func SupportsSelectorFilter(filter AnalyticsFilter) bool {
 func storedStatsConditions(filter AnalyticsFilter, revision string, fromMS, toMS int64) ([]string, []any) {
 	conditions := []string{"structure_revision = ?", "bucket_ms >= ?", "bucket_ms < ?"}
 	args := []any{revision, fromMS, toMS}
-	appendStatsScopeConditions(filter, "", &conditions, &args)
+	appendStatsScopeConditions(filter, "", "billing_model", &conditions, &args)
 	return conditions, args
 }
 
@@ -90,11 +90,11 @@ func rawStatsConditions(filter AnalyticsFilter, fromMS, toMS, afterID int64, use
 		conditions = append(conditions, "e.id > ?")
 		args = append(args, afterID)
 	}
-	appendStatsScopeConditions(filter, "e.", &conditions, &args)
+	appendStatsScopeConditions(filter, "e.", "resolved_model", &conditions, &args)
 	return conditions, args
 }
 
-func appendStatsScopeConditions(filter AnalyticsFilter, prefix string, conditions *[]string, args *[]any) {
+func appendStatsScopeConditions(filter AnalyticsFilter, prefix, resolvedModelColumn string, conditions *[]string, args *[]any) {
 	column := func(name string) string { return prefix + name }
 	addInCondition := func(expression string, values []string) {
 		normalized := normalizeFilterValues(values)
@@ -111,7 +111,7 @@ func appendStatsScopeConditions(filter AnalyticsFilter, prefix string, condition
 		*args = append(*args, hash)
 	}
 	addInCondition(column("model"), filter.Models)
-	addProviderStatsCondition(filter.Providers, prefix, conditions, args)
+	addProviderStatsCondition(filter.Providers, prefix, resolvedModelColumn, conditions, args)
 	addAccountStatsCondition(filter.Accounts, prefix, conditions, args)
 	credentialExpr := fmt.Sprintf("coalesce(nullif(%sauth_file_snapshot, ''), nullif(%sauth_index, ''), nullif(%ssource_hash, ''), nullif(%ssource, ''), '-')", prefix, prefix, prefix, prefix)
 	addInCondition(credentialExpr, filter.CredentialIDs)
@@ -128,20 +128,54 @@ func appendStatsScopeConditions(filter AnalyticsFilter, prefix string, condition
 	}
 }
 
-func addProviderStatsCondition(values []string, prefix string, conditions *[]string, args *[]any) {
+func addProviderStatsCondition(values []string, prefix, resolvedModelColumn string, conditions *[]string, args *[]any) {
 	normalized := normalizeLowerFilterValues(values)
 	if len(normalized) == 0 {
 		return
 	}
 	encoded := encodeJSONFilterValues(normalized)
-	providerConditions := []string{
-		"lower(coalesce(" + prefix + "provider, '')) in (select value from json_each(?))",
-		"lower(coalesce(" + prefix + "auth_provider_snapshot, '')) in (select value from json_each(?))",
-	}
-	*conditions = append(*conditions, "("+strings.Join(providerConditions, " or ")+")")
-	for range providerConditions {
-		*args = append(*args, encoded)
-	}
+	providerExpression := effectiveProviderExpression(
+		prefix+"provider",
+		prefix+"auth_provider_snapshot",
+		prefix+"model",
+		prefix+resolvedModelColumn,
+	)
+	*conditions = append(*conditions, providerExpression+" in (select value from json_each(?))")
+	*args = append(*args, encoded)
+}
+
+func effectiveProviderExpression(providerColumn, authProviderColumn, modelColumn, resolvedModelColumn string) string {
+	provider := "lower(coalesce(nullif(" + authProviderColumn + ", ''), nullif(" + providerColumn + ", ''), ''))"
+	modelProvider := inferredProviderCase(modelColumn)
+	resolvedModelProvider := inferredProviderCase(resolvedModelColumn)
+	return "case " +
+		"when " + preferredInferredProviderCondition(provider, modelProvider) + " then " + modelProvider + " " +
+		"when " + preferredInferredProviderCondition(provider, resolvedModelProvider) + " then " + resolvedModelProvider + " " +
+		"else " + provider + " end"
+}
+
+func preferredInferredProviderCondition(provider, inferred string) string {
+	return inferred + " <> '' and (" +
+		provider + " in ('', 'apikey', 'api-key', 'api_key') or (" +
+		inferred + " in ('zhipu', 'mimo', 'minimax', 'deepseek', 'kimi', 'qwen', 'xai', 'gemini') and " +
+		provider + " in ('claude', 'anthropic', 'openai', 'codex', 'apikey', 'api-key', 'api_key')))"
+}
+
+func inferredProviderCase(column string) string {
+	value := "lower(coalesce(" + column + ", ''))"
+	return "case " +
+		"when instr(" + value + ", 'grok') > 0 or instr(" + value + ", 'xai') > 0 then 'xai' " +
+		"when instr(" + value + ", 'gemini') > 0 or instr(" + value + ", 'vertex') > 0 then 'gemini' " +
+		"when instr(" + value + ", 'claude') > 0 or instr(" + value + ", 'anthropic') > 0 then 'claude' " +
+		"when instr(" + value + ", 'codex') > 0 then 'codex' " +
+		"when " + value + " like 'gpt-%' then 'openai' " +
+		"when instr(" + value + ", 'glm') > 0 or instr(" + value + ", 'zhipu') > 0 then 'zhipu' " +
+		"when instr(" + value + ", 'mimo') > 0 or instr(" + value + ", 'xiaomimimo') > 0 then 'mimo' " +
+		"when instr(" + value + ", 'minimax') > 0 or instr(" + value + ", 'abab') > 0 then 'minimax' " +
+		"when instr(" + value + ", 'deepseek') > 0 then 'deepseek' " +
+		"when instr(" + value + ", 'kimi') > 0 then 'kimi' " +
+		"when instr(" + value + ", 'qwen') > 0 then 'qwen' " +
+		"else '' end"
 }
 
 func addAccountStatsCondition(values []string, prefix string, conditions *[]string, args *[]any) {

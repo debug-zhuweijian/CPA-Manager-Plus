@@ -140,6 +140,19 @@ func TestAnalyticsNormalizesGenericAPIKeyProviderFromModel(t *testing.T) {
 	if resp.Summary == nil || resp.Summary.TotalCalls != 1 || resp.Events == nil || len(resp.Events.Items) != 1 {
 		t.Fatalf("provider-filtered response = %#v", resp)
 	}
+
+	resp, err = New(db).Analytics(ctx, Request{
+		FromMS:  fromMS,
+		ToMS:    toMS,
+		Filters: Filters{Providers: []string{"apikey"}},
+		Include: Include{Summary: true, EventsPage: &EventsPage{Limit: 10}},
+	})
+	if err != nil {
+		t.Fatalf("analytics stale provider filter: %v", err)
+	}
+	if resp.Summary == nil || resp.Summary.TotalCalls != 0 || resp.Events == nil || len(resp.Events.Items) != 0 {
+		t.Fatalf("generic provider must not match after model normalization: %#v", resp)
+	}
 }
 
 func TestAnalyticsUsesModelProviderAndSourceScopedAccountRows(t *testing.T) {
@@ -201,5 +214,18 @@ func TestAnalyticsUsesModelProviderAndSourceScopedAccountRows(t *testing.T) {
 		if item.AuthProviderSnapshot != "zhipu" {
 			t.Fatalf("event provider = %q, want zhipu in %#v", item.AuthProviderSnapshot, item)
 		}
+	}
+
+	resp, err = New(db).Analytics(ctx, Request{
+		FromMS:  fromMS,
+		ToMS:    toMS,
+		Filters: Filters{Providers: []string{"claude"}},
+		Include: Include{Summary: true, EventsPage: &EventsPage{Limit: 10}},
+	})
+	if err != nil {
+		t.Fatalf("analytics stale Claude provider filter: %v", err)
+	}
+	if resp.Summary == nil || resp.Summary.TotalCalls != 0 || resp.Events == nil || len(resp.Events.Items) != 0 {
+		t.Fatalf("Claude provider must not match GLM-normalized rows: %#v", resp)
 	}
 }

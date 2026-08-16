@@ -173,14 +173,14 @@ func addProviderEventCondition(values []string, prefix string, conditions *[]str
 		return
 	}
 	encoded := encodeJSONFilterValues(normalized)
-	providerConditions := []string{
-		"lower(coalesce(" + prefix + "provider, '')) in (select value from json_each(?))",
-		"lower(coalesce(" + prefix + "auth_provider_snapshot, '')) in (select value from json_each(?))",
-	}
-	*conditions = append(*conditions, "("+strings.Join(providerConditions, " or ")+")")
-	for range providerConditions {
-		*args = append(*args, encoded)
-	}
+	providerExpression := effectiveProviderExpression(
+		prefix+"provider",
+		prefix+"auth_provider_snapshot",
+		prefix+"model",
+		prefix+"resolved_model",
+	)
+	*conditions = append(*conditions, providerExpression+" in (select value from json_each(?))")
+	*args = append(*args, encoded)
 }
 
 func addAccountEventCondition(values []string, prefix string, conditions *[]string, args *[]any) {

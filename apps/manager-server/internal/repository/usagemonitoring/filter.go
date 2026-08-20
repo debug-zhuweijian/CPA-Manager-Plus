@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/usageidentity"
 )
 
 func SupportsStatsFilter(filter AnalyticsFilter) bool {
@@ -110,8 +112,24 @@ func appendStatsScopeConditions(filter AnalyticsFilter, prefix, resolvedModelCol
 		*conditions = append(*conditions, "lower(coalesce("+column("api_key_hash")+", '')) = ?")
 		*args = append(*args, hash)
 	}
-	addInCondition(column("model"), filter.Models)
-	addProviderStatsCondition(filter.Providers, prefix, resolvedModelColumn, conditions, args)
+	modelExpression := column("model")
+	providerModelExpression := modelExpression
+	if prefix != "" {
+		providerModelExpression = usageidentity.SQLEffectiveRequestedModelExpression(
+			modelExpression,
+			prefix+"requested_model",
+		)
+		modelExpression = usageidentity.SQLAnalyticsModelExpression(providerModelExpression)
+	}
+	addInCondition(modelExpression, normalizeModelFilterValues(filter.Models))
+	addProviderStatsCondition(
+		filter.Providers,
+		prefix,
+		providerModelExpression,
+		column(resolvedModelColumn),
+		conditions,
+		args,
+	)
 	addAccountStatsCondition(filter.Accounts, prefix, conditions, args)
 	credentialExpr := fmt.Sprintf("coalesce(nullif(%sauth_file_snapshot, ''), nullif(%sauth_index, ''), nullif(%ssource_hash, ''), nullif(%ssource, ''), '-')", prefix, prefix, prefix, prefix)
 	addInCondition(credentialExpr, filter.CredentialIDs)
@@ -128,7 +146,14 @@ func appendStatsScopeConditions(filter AnalyticsFilter, prefix, resolvedModelCol
 	}
 }
 
-func addProviderStatsCondition(values []string, prefix, resolvedModelColumn string, conditions *[]string, args *[]any) {
+func addProviderStatsCondition(
+	values []string,
+	prefix,
+	modelExpression,
+	resolvedModelExpression string,
+	conditions *[]string,
+	args *[]any,
+) {
 	normalized := normalizeLowerFilterValues(values)
 	if len(normalized) == 0 {
 		return
@@ -137,8 +162,8 @@ func addProviderStatsCondition(values []string, prefix, resolvedModelColumn stri
 	providerExpression := effectiveProviderExpression(
 		prefix+"provider",
 		prefix+"auth_provider_snapshot",
-		prefix+"model",
-		prefix+resolvedModelColumn,
+		modelExpression,
+		resolvedModelExpression,
 	)
 	*conditions = append(*conditions, providerExpression+" in (select value from json_each(?))")
 	*args = append(*args, encoded)
@@ -216,6 +241,18 @@ func normalizeFilterValues(values []string) []string {
 		result = append(result, trimmed)
 	}
 	return result
+}
+
+func normalizeModelFilterValues(values []string) []string {
+	models := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		models = append(models, usageidentity.AnalyticsModel(trimmed))
+	}
+	return normalizeFilterValues(models)
 }
 
 func normalizeLowerFilterValues(values []string) []string {

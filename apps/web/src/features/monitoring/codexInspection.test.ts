@@ -136,6 +136,7 @@ const createResultItem = (
   error: overrides.error ?? '',
   planType: overrides.planType ?? null,
   quotaWindows: overrides.quotaWindows ?? [],
+  quotaInventoryObserved: overrides.quotaInventoryObserved,
   errorKind: overrides.errorKind ?? '',
   errorDetail: overrides.errorDetail ?? '',
   actionHandled: overrides.actionHandled ?? false,
@@ -235,6 +236,8 @@ describe('credential inspection state labels', () => {
     expect(serverInspectionPageSource).not.toContain("reasonParts.join(' · ')");
     expect(serverInspectionPageSource).not.toContain('formatServerResultStateDetail');
     expect(serverInspectionPageSource).toContain('formatServerTerminalActionStatusLabel');
+    expect(serverInspectionPageSource).toContain('runtimeId: item.runtimeId ?? null');
+    expect(serverInspectionPageSource).toContain('accountSnapshot: item.accountSnapshot ?? null');
     expect(serverInspectionPageSource).toContain("errorDetail: item.errorDetail || ''");
     expect(serverInspectionPageSource).not.toContain('item.actionError || item.errorDetail');
     expect(serverInspectionPageSource).toContain('const actionError = source.actionError?.trim()');
@@ -629,6 +632,23 @@ describe('Codex inspection error summaries', () => {
 });
 
 describe('local inspection lifecycle log details', () => {
+  it('pins auth-file loading and probes to the connection captured at session start', async () => {
+    const listSpy = vi.spyOn(authFilesApi, 'list').mockResolvedValue({ files: [] });
+
+    await inspectCodexAccounts({
+      config: null,
+      apiBase: 'https://captured-cpa.example.test',
+      managementKey: 'captured-management-key',
+      settings: { targetTypes: ['codex'], sampleSize: 0 },
+      t: translateEn,
+    });
+
+    expect(listSpy).toHaveBeenCalledWith({
+      apiBase: 'https://captured-cpa.example.test',
+      managementKey: 'captured-management-key',
+    });
+  });
+
   it('emits server-shaped details for loading, collection, and completion', async () => {
     vi.spyOn(authFilesApi, 'list').mockResolvedValue({ files: [] });
     const logs: Array<{
@@ -4632,6 +4652,15 @@ describe('Codex inspection last-run cache', () => {
     );
   });
 
+  it('guards embedded local snapshots by the active connection fingerprint', () => {
+    expect(localInspectionPageSource).toContain(
+      'resultConnectionFingerprint !== connectionFingerprint'
+    );
+    expect(localInspectionPageSource).toContain(
+      '[connectionFingerprint, onSnapshotChange, result, resultConnectionFingerprint, runStatus]'
+    );
+  });
+
   it('sanitizes raw auth data before saving browser cache', () => {
     const storage = createStorage();
     vi.stubGlobal('localStorage', storage);
@@ -4849,6 +4878,7 @@ describe('Codex inspection last-run cache', () => {
           usedPercent: 87,
           isQuota: true,
           planType: 'team',
+          quotaInventoryObserved: true,
           quotaWindows: [
             {
               id: 'monthly',
@@ -4869,6 +4899,7 @@ describe('Codex inspection last-run cache', () => {
 
     const loaded = loadCodexInspectionLastRun();
     expect(loaded?.result.results[0].planType).toBe('team');
+    expect(loaded?.result.results[0].quotaInventoryObserved).toBe(true);
     expect(loaded?.result.results[0].quotaWindows).toEqual([
       {
         id: 'monthly',

@@ -22,11 +22,16 @@ describe('buildUsageDetailsFromAnalyticsEvents', () => {
       {
         event_hash: 'event-1',
         timestamp_ms: Date.UTC(2026, 4, 20, 1, 2, 3),
-        model: 'alias-model',
+        model: 'alias-model(max)',
+        analytics_model: 'alias-model',
+        requested_model: 'original-alias-model(max)',
         resolved_model: 'upstream-model',
         endpoint: 'POST /v1/chat/completions',
         method: 'POST',
         path: '/v1/chat/completions',
+        client_ip: '192.0.2.10',
+        x_forwarded_for: '203.0.113.5, 198.51.100.8',
+        user_agent: 'test-client/1.0',
         auth_index: 'auth-1',
         source: 'source.json',
         source_hash: 'source-hash',
@@ -55,8 +60,14 @@ describe('buildUsageDetailsFromAnalyticsEvents', () => {
 
     expect(details[0]).toMatchObject({
       __modelName: 'alias-model',
+      __requestedModel: 'original-alias-model(max)',
       __resolvedModel: 'upstream-model',
+      analytics_model: 'alias-model',
+      requested_model: 'original-alias-model(max)',
       auth_project_id_snapshot: 'project-1',
+      client_ip: '192.0.2.10',
+      x_forwarded_for: '203.0.113.5, 198.51.100.8',
+      user_agent: 'test-client/1.0',
       reasoning_effort: 'medium',
       latency_ms: 123,
       ttft_ms: 45,
@@ -68,6 +79,42 @@ describe('buildUsageDetailsFromAnalyticsEvents', () => {
       failed: true,
       fail_status_code: 429,
       fail_summary: 'rate limit exceeded',
+    });
+  });
+
+  it('derives analytics model when the backend field is absent', () => {
+    const events: MonitoringAnalyticsEventRow[] = [
+      {
+        event_hash: 'event-legacy-model',
+        timestamp_ms: Date.UTC(2026, 4, 20, 1, 2, 3),
+        model: 'deepseek-v4-flash(max)',
+        requested_model: 'deepseek-v4-flash(max)',
+        endpoint: 'POST /v1/chat/completions',
+        method: 'POST',
+        path: '/v1/chat/completions',
+        auth_index: '',
+        source: '',
+        source_hash: '',
+        api_key_hash: '',
+        account_snapshot: '',
+        auth_label_snapshot: '',
+        auth_provider_snapshot: '',
+        input_tokens: 1,
+        output_tokens: 0,
+        cached_tokens: 0,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+        reasoning_tokens: 0,
+        total_tokens: 1,
+        latency_ms: null,
+        failed: false,
+      },
+    ];
+
+    expect(buildUsageDetailsFromAnalyticsEvents(events)[0]).toMatchObject({
+      __modelName: 'deepseek-v4-flash',
+      __requestedModel: 'deepseek-v4-flash(max)',
+      analytics_model: 'deepseek-v4-flash',
     });
   });
 
@@ -220,6 +267,7 @@ describe('buildAnalyticsFilters', () => {
     const filters = buildAnalyticsFilters(
       {
         authFile: 'codex-auth.json',
+        authIndex: 'auth-1',
         projectId: 'project-1',
         requestType: 'codex',
         minLatencyMs: 10_000,
@@ -231,6 +279,7 @@ describe('buildAnalyticsFilters', () => {
 
     expect(filters).toEqual({
       auth_files: ['codex-auth.json'],
+      auth_indices: ['auth-1'],
       project_ids: ['project-1'],
       request_types: ['codex'],
       min_latency_ms: 10_000,

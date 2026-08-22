@@ -4,6 +4,7 @@ import type { TFunction } from 'i18next';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import type {
+  CodexInspectionResult,
   CodexInspectionRun,
   CodexInspectionRunDetail,
   ManagerConfig,
@@ -14,7 +15,7 @@ import {
   getRunStatusLabel,
   hasActiveRun,
 } from '@/features/monitoring/model/serverCodexInspectionLifecycle';
-import { ServerCodexInspectionPage } from './ServerCodexInspectionPage';
+import { ServerCodexInspectionPage, toServerResultItem } from './ServerCodexInspectionPage';
 
 const mocks = vi.hoisted(() => ({
   authState: {
@@ -192,6 +193,46 @@ const flush = async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   await Promise.resolve();
 };
+
+describe('ServerCodexInspectionPage quota mapping', () => {
+  it('preserves absolute reset metadata from the server result', () => {
+    const resetAtMs = Date.parse('2026-08-20T03:40:00Z');
+    const item: CodexInspectionResult = {
+      id: 7,
+      runId: 1,
+      accountKey: 'codex.json::auth-1',
+      fileName: 'codex.json',
+      displayAccount: 'account@example.com',
+      provider: 'codex',
+      disabled: false,
+      action: 'keep',
+      actionReason: '',
+      isQuota: false,
+      createdAtMs: 0,
+      quotaWindows: [
+        {
+          id: 'five-hour',
+          labelKey: 'codex_quota.primary_window',
+          usedPercent: 42,
+          resetLabel: '08/20 03:40',
+          resetAtMs,
+          resetAccuracy: 'exact',
+          limitWindowSeconds: 18_000,
+        },
+      ],
+    };
+
+    const mapped = toServerResultItem(item, t, undefined, 'en');
+
+    expect(mapped.quotaWindows).toEqual([
+      expect.objectContaining({
+        resetLabel: '08/20 03:40',
+        resetAtMs,
+        resetAccuracy: 'exact',
+      }),
+    ]);
+  });
+});
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;

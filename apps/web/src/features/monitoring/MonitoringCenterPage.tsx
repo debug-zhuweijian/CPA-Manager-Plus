@@ -54,10 +54,12 @@ import {
 } from '@/features/monitoring/components/ApiKeySummaryPanel';
 import { MonitoringDataPanel } from '@/features/monitoring/components/MonitoringDataPanel';
 import { MonitoringActionBar } from '@/features/monitoring/components/MonitoringActionBar';
+import { MonitoringDatabaseMaintenanceHint } from '@/features/monitoring/components/MonitoringDatabaseMaintenanceHint';
 import { MonitoringCustomRangeModal } from '@/features/monitoring/components/MonitoringCustomRangeModal';
 import { MonitoringFiltersPanel } from '@/features/monitoring/components/MonitoringFiltersPanel';
 import { UsageImportProgressModal } from '@/features/monitoring/components/UsageImportProgressModal';
 import { usePageTransitionLayer } from '@/components/common/PageTransitionLayer';
+import { useDatabaseMaintenance } from '@/components/common/useDatabaseMaintenance';
 import { IconInbox } from '@/components/ui/icons';
 import {
   MonitoringStatusHeader,
@@ -138,6 +140,7 @@ export { AccountExpandedDetails, AccountOverviewCard };
 
 const MAX_CONCURRENT_ACCOUNT_QUOTA_PROVIDERS = 3;
 const MAX_CONCURRENT_ACCOUNT_QUOTA_REQUESTS_PER_PROVIDER = 1;
+const DATABASE_MAINTENANCE_LONG_RANGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const DEFAULT_ACCOUNT_PAGE_SIZE = ACCOUNT_OVERVIEW_TABLE_PAGE_SIZE_OPTIONS[0];
 const EMPTY_STATUS_BAR_DATA: StatusBarData = {
@@ -156,6 +159,7 @@ const shortLabel = (t: TFunction, shortKey: string, fallbackKey: string) => {
 
 export function MonitoringCenterPage() {
   const { t, i18n } = useTranslation();
+  const { status: managerStatus } = useDatabaseMaintenance();
   const location = useLocation();
   const config = useConfigStore((state) => state.config);
   const connectionStatus = useAuthStore((state) => state.connectionStatus);
@@ -196,6 +200,8 @@ export function MonitoringCenterPage() {
   const [timeRange, setTimeRange] = useState<MonitoringTimeRange>(
     initialMonitoringCenterUiState.current.timeRange
   );
+  const databaseMaintenance = managerStatus?.databaseMaintenance;
+  const monitoringMaintenanceWarning = databaseMaintenance?.performanceDegraded === true;
   const [customStartInput, setCustomStartInput] = useState(
     () => initialMonitoringCenterUiState.current.customStartInput || getTodayStartInputValue()
   );
@@ -352,6 +358,14 @@ export function MonitoringCenterPage() {
       endMs: customEndMs,
     };
   }, [customEndMs, customStartMs, customTimeRangeError, timeRange]);
+  const monitoringMaintenanceLongRange =
+    timeRange === '7d' ||
+    timeRange === '14d' ||
+    timeRange === '30d' ||
+    timeRange === 'all' ||
+    (timeRange === 'custom' &&
+      customTimeRange !== null &&
+      customTimeRange.endMs - customTimeRange.startMs >= DATABASE_MAINTENANCE_LONG_RANGE_MS);
   const customDraftTimeRangeError = useMemo(() => {
     if (customDraftStartMs === null || customDraftEndMs === null) {
       return t('monitoring.custom_range_required');
@@ -1632,6 +1646,11 @@ export function MonitoringCenterPage() {
         monitoringUnavailableTitle={monitoringUnavailableTitle}
         monitoringUnavailableBody={monitoringUnavailableBody}
         t={t}
+      />
+
+      <MonitoringDatabaseMaintenanceHint
+        performanceDegraded={monitoringMaintenanceWarning}
+        longRange={monitoringMaintenanceLongRange}
       />
 
       <MonitoringActionBar

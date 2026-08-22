@@ -195,6 +195,9 @@ const makeCodexFile = (name: string, authIndex: string, account: string): AuthFi
     disabled: false,
   }) as AuthFileItem;
 
+const CODEX_MAIN_MODEL = 'gpt-5.6-sol';
+const CODEX_MAIN_SCOPE = { kind: 'family', key: 'codex_main', complete: true } as const;
+
 const makeCodexQuotaData = (): CodexQuotaData => ({
   planType: 'plus',
   windows: [],
@@ -2658,6 +2661,7 @@ describe('AccountsPage replacement flows', () => {
         {
           event_hash: 'mixed-auth-quota-header',
           timestamp_ms: 1_000,
+          model: CODEX_MAIN_MODEL,
           auth_file_snapshot: 'codex.json',
           auth_index: 'auth-1',
           account_snapshot: 'codex@example.com',
@@ -2978,6 +2982,7 @@ describe('AccountsPage replacement flows', () => {
         {
           event_hash: 'quota-refresh-401-header',
           timestamp_ms: 1_000,
+          model: CODEX_MAIN_MODEL,
           auth_file_snapshot: 'codex.json',
           auth_index: 'auth-1',
           account_snapshot: 'codex@example.com',
@@ -3054,6 +3059,7 @@ describe('AccountsPage replacement flows', () => {
         {
           event_hash: 'newer-healthy-quota-header',
           timestamp_ms: 2_000,
+          model: CODEX_MAIN_MODEL,
           auth_file_snapshot: 'codex.json',
           auth_index: 'auth-1',
           account_snapshot: 'codex@example.com',
@@ -3106,6 +3112,7 @@ describe('AccountsPage replacement flows', () => {
           label: 'Weekly',
           usedPercent: 20,
           resetLabel: 'Mon',
+          modelScope: CODEX_MAIN_SCOPE,
         },
       ],
     });
@@ -3181,6 +3188,7 @@ describe('AccountsPage replacement flows', () => {
         {
           event_hash: 'same-time-partial-header',
           timestamp_ms: 2_000,
+          model: CODEX_MAIN_MODEL,
           auth_file_snapshot: 'codex.json',
           auth_index: 'auth-1',
           account_snapshot: 'codex@example.com',
@@ -3232,6 +3240,7 @@ describe('AccountsPage replacement flows', () => {
         {
           event_hash: 'weekly-limit',
           timestamp_ms: 1_700_000_000_000,
+          model: CODEX_MAIN_MODEL,
           auth_file_snapshot: 'weekly.json',
           auth_index: 'weekly-auth',
           account_snapshot: 'weekly@example.com',
@@ -3252,6 +3261,7 @@ describe('AccountsPage replacement flows', () => {
         {
           event_hash: 'expired-weekly-limit',
           timestamp_ms: 1_699_000_000_000,
+          model: CODEX_MAIN_MODEL,
           auth_file_snapshot: 'available.json',
           auth_index: 'available-auth',
           account_snapshot: 'available@example.com',
@@ -3742,9 +3752,9 @@ describe('AccountsPage replacement flows', () => {
       await Promise.resolve();
     });
 
-    expect(findHostButtonByText(renderer, 'accounts.detail_tab_config').props['aria-selected']).toBe(
-      true
-    );
+    expect(
+      findHostButtonByText(renderer, 'accounts.detail_tab_config').props['aria-selected']
+    ).toBe(true);
     expect(mocks.navigate).toHaveBeenCalledWith(
       {
         pathname: '/accounts',
@@ -4674,6 +4684,7 @@ describe('AccountsPage replacement flows', () => {
         {
           event_hash: 'healthy-header-evidence',
           timestamp_ms: observedAtMs,
+          model: CODEX_MAIN_MODEL,
           auth_file_snapshot: file.name,
           auth_index: String(file.authIndex ?? ''),
           account_snapshot: String(file.account ?? ''),
@@ -9058,6 +9069,7 @@ describe('AccountsPage replacement flows', () => {
             resetAtMs,
             resetAccuracy: 'exact',
             limitWindowSeconds: 5 * 60 * 60,
+            modelScope: CODEX_MAIN_SCOPE,
           },
         ],
       }),
@@ -9072,6 +9084,7 @@ describe('AccountsPage replacement flows', () => {
             resetAtMs,
             resetAccuracy: 'exact',
             limitWindowSeconds: 5 * 60 * 60,
+            modelScope: CODEX_MAIN_SCOPE,
           },
         ],
       }),
@@ -10001,6 +10014,7 @@ describe('AccountsPage replacement flows', () => {
           resetAtMs,
           resetAccuracy: 'exact',
           limitWindowSeconds: 7 * 24 * 60 * 60,
+          modelScope: CODEX_MAIN_SCOPE,
         },
       ],
     });
@@ -10012,6 +10026,7 @@ describe('AccountsPage replacement flows', () => {
         {
           event_hash: 'newer-header-event',
           timestamp_ms: headerTimestampMs,
+          model: CODEX_MAIN_MODEL,
           auth_file_snapshot: 'codex.json',
           auth_index: 'auth-1',
           account_snapshot: 'codex@example.com',

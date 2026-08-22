@@ -593,7 +593,8 @@ function buildObservedHeaderEvidence(
   return evidence;
 }
 
-function toServerResultItem(
+// eslint-disable-next-line react-refresh/only-export-components -- pure mapper is exported for unit testing
+export function toServerResultItem(
   item: CodexInspectionResult,
   t: ReturnType<typeof useTranslation>['t'],
   snapshot: UsageHeaderSnapshot | undefined,
@@ -631,7 +632,11 @@ function toServerResultItem(
       labelParams: window.labelParams,
       usedPercent: window.usedPercent ?? null,
       resetLabel: window.resetLabel ?? '',
+      resetAtMs: window.resetAtMs ?? null,
+      resetAccuracy: window.resetAccuracy,
       limitWindowSeconds: window.limitWindowSeconds ?? null,
+      modelScope: window.modelScope,
+      providerWindowAliases: window.providerWindowAliases,
     })),
     quotaInventoryObserved: item.quotaInventoryObserved,
     errorKind: item.errorKind,

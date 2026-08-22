@@ -21,7 +21,7 @@ import {
 } from '@/features/demo/demoFixtures';
 import { isDemoMode } from '@/features/demo/demoMode';
 import { hasCodexInspectionStableIdentity } from '@/features/monitoring/model/codexInspectionOwnership';
-import type { AuthFileItem } from '@/types';
+import type { AuthFileItem, QuotaModelScope } from '@/types';
 import { normalizeApiBase } from '@/utils/connection';
 import {
   getAuthFileStatusIdentityKey,
@@ -115,6 +115,22 @@ export interface UsageServiceDatabaseStatus {
   checkpoint?: UsageServiceCheckpointStatus;
 }
 
+export type UsageServiceDatabaseMaintenanceReason =
+  | 'deferred_indexes'
+  | 'offline_derived_cleanup'
+  | 'offline_quota_snapshot_migration'
+  | 'legacy_index_replacement'
+  | string;
+
+export interface UsageServiceDatabaseMaintenanceStatus {
+  required: boolean;
+  performanceDegraded: boolean;
+  deferredIndexes: number;
+  offlineJobs: number;
+  reasons: UsageServiceDatabaseMaintenanceReason[];
+  command?: string;
+}
+
 export interface UsageServiceStatus {
   service?: string;
   version?: string;
@@ -125,7 +141,10 @@ export interface UsageServiceStatus {
   deadLetters?: number;
   collector?: UsageServiceCollectorStatus;
   database?: UsageServiceDatabaseStatus;
+  databaseMaintenance?: UsageServiceDatabaseMaintenanceStatus;
 }
+
+export type UsageServiceStatusScope = 'database-maintenance';
 
 export interface AccountPolicyCapability {
   enabled: boolean;
@@ -289,6 +308,8 @@ export interface CodexInspectionQuotaWindow {
   resetAtMs?: number | null;
   resetAccuracy?: 'exact' | 'derived' | 'estimated' | 'unknown';
   limitWindowSeconds?: number | null;
+  modelScope?: QuotaModelScope;
+  providerWindowAliases?: string[];
 }
 
 export interface CodexInspectionResult {
@@ -899,6 +920,7 @@ export interface MonitoringAccountWindowModelScope {
   kind: 'all' | 'family' | 'models' | 'product' | 'feature';
   key?: string;
   models?: string[];
+  complete?: boolean;
 }
 
 export interface MonitoringAccountWindowUsageRequest {
@@ -970,6 +992,7 @@ export interface AccountQuotaSnapshotObservationInput {
 
 export interface AccountQuotaSnapshotRemovedWindowInput {
   provider_window_id: string;
+  window_kind?: string;
   model_scope_kind?: MonitoringAccountWindowModelScope['kind'];
   model_scope_key?: string;
   model_ids?: string[];
@@ -977,6 +1000,7 @@ export interface AccountQuotaSnapshotRemovedWindowInput {
 
 export interface AccountQuotaSnapshotWindowInput {
   provider_window_id: string;
+  provider_window_aliases?: string[];
   window_kind: string;
   window_mode: AccountQuotaSnapshotWindowMode;
   model_scope_kind: MonitoringAccountWindowModelScope['kind'];
@@ -1726,6 +1750,10 @@ export interface ResponseHeaderMetadata {
 export interface UsageHeaderSnapshot {
   event_hash: string;
   timestamp_ms: number;
+  model?: string;
+  analytics_model?: string;
+  requested_model?: string;
+  resolved_model?: string;
   auth_file_snapshot?: string;
   auth_index?: string;
   account_snapshot?: string;
@@ -2758,13 +2786,19 @@ export const usageServiceApi = {
     });
   },
 
-  getStatus: async (base: string, managementKey?: string): Promise<UsageServiceStatus> => {
+  getStatus: async (
+    base: string,
+    managementKey?: string,
+    scope?: UsageServiceStatusScope
+  ): Promise<UsageServiceStatus> => {
     if (__DEMO_SITE__ && isDemoMode()) {
       return getDemoUsageServiceStatus();
     }
 
     return withUsageServiceError(async () => {
-      const response = await axios.get<UsageServiceStatus>(buildUrl(base, '/status'), {
+      const statusPath =
+        scope === 'database-maintenance' ? '/status?scope=database-maintenance' : '/status';
+      const response = await axios.get<UsageServiceStatus>(buildUrl(base, statusPath), {
         timeout: USAGE_SERVICE_TIMEOUT_MS,
         headers: authHeaders(managementKey),
       });

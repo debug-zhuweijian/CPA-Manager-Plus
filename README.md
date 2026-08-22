@@ -32,7 +32,7 @@ Operate providers, credentials, OAuth, plugins, and configuration while keeping 
   <tr>
     <td align="center">
       <strong>Dashboard</strong><br>
-      <img src="img/home.png" alt="CPA CLIProxyAPI management and observability dashboard" width="420">
+      <img src="img/dashboard.png" alt="CPA CLIProxyAPI management and observability dashboard" width="420">
     </td>
     <td align="center">
       <strong>Request Monitoring</strong><br>
@@ -45,8 +45,18 @@ Operate providers, credentials, OAuth, plugins, and configuration while keeping 
       <img src="img/usage-analytics.png" alt="CPA usage and cost analytics by model and account" width="420">
     </td>
     <td align="center">
-      <strong>Account Health</strong><br>
-      <img src="img/codex-inspection.png" alt="Codex and xAI account inspection and quota health" width="420">
+      <strong>Credential Management</strong><br>
+      <img src="img/credential.png" alt="CPA credential management list with availability, usage, quota, and actions" width="420">
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <strong>Credential Health Inspection</strong><br>
+      <img src="img/credential-health.png" alt="CPA credential health inspection status, history, and results" width="420">
+    </td>
+    <td align="center">
+      <strong>Credential Quota</strong><br>
+      <img src="img/credential-quota.png" alt="CPA credential quota usage, current window, and forecast" width="420">
     </td>
   </tr>
 </table>

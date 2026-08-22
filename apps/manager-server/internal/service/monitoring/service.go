@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/codexquota"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/service/pricing"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/service/usagehourly"
 	monitoringrollup "github.com/seakee/cpa-manager-plus/apps/manager-server/internal/service/usagemonitoring"
@@ -292,6 +294,8 @@ type AccountWindowUsageTarget struct {
 	FromMS                int64                   `json:"from_ms"`
 	ToMS                  int64                   `json:"to_ms"`
 	ModelScope            AccountWindowModelScope `json:"model_scope,omitempty"`
+	ModelScopeProvided    bool                    `json:"-"`
+	ModelScopeCompleteSet bool                    `json:"-"`
 	AccountSnapshot       string                  `json:"account_snapshot,omitempty"`
 	AuthLabelSnapshot     string                  `json:"auth_label_snapshot,omitempty"`
 	AuthFileSnapshot      string                  `json:"auth_file_snapshot,omitempty"`
@@ -301,10 +305,61 @@ type AccountWindowUsageTarget struct {
 	Source                string                  `json:"source,omitempty"`
 }
 
+func (target *AccountWindowUsageTarget) UnmarshalJSON(data []byte) error {
+	type alias AccountWindowUsageTarget
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	// This type has a custom unmarshaler so it can distinguish an omitted
+	// legacy model_scope from an explicitly incomplete scope. Keep the
+	// controller's DisallowUnknownFields contract for the target itself while
+	// allowing forward-compatible metadata inside model_scope.
+	knownFields := map[string]struct{}{
+		"request_key": {}, "row_key": {}, "window_key": {}, "provider_window_id": {},
+		"period": {}, "from_ms": {}, "to_ms": {}, "model_scope": {},
+		"account_snapshot": {}, "auth_label_snapshot": {}, "auth_file_snapshot": {},
+		"auth_provider_snapshot": {}, "auth_project_id_snapshot": {}, "auth_index": {},
+		"source": {},
+	}
+	for field := range fields {
+		if _, ok := knownFields[field]; ok {
+			continue
+		}
+		matched := false
+		for known := range knownFields {
+			if strings.EqualFold(field, known) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return fmt.Errorf("json: unknown field %q", field)
+		}
+	}
+	*target = AccountWindowUsageTarget(decoded)
+	rawScope, provided := fields["model_scope"]
+	if !provided || strings.TrimSpace(string(rawScope)) == "null" {
+		return nil
+	}
+	target.ModelScopeProvided = true
+	var scopeFields map[string]json.RawMessage
+	if err := json.Unmarshal(rawScope, &scopeFields); err != nil {
+		return err
+	}
+	_, target.ModelScopeCompleteSet = scopeFields["complete"]
+	return nil
+}
+
 type AccountWindowModelScope struct {
-	Kind   string   `json:"kind,omitempty"`
-	Key    string   `json:"key,omitempty"`
-	Models []string `json:"models,omitempty"`
+	Kind     string   `json:"kind,omitempty"`
+	Key      string   `json:"key,omitempty"`
+	Models   []string `json:"models,omitempty"`
+	Complete bool     `json:"complete,omitempty"`
 }
 
 type AccountWindowUsageResponse struct {
@@ -736,6 +791,10 @@ type RecentFailure struct {
 type HeaderSnapshot struct {
 	EventHash              string                        `json:"event_hash"`
 	TimestampMS            int64                         `json:"timestamp_ms"`
+	Model                  string                        `json:"model,omitempty"`
+	AnalyticsModel         string                        `json:"analytics_model,omitempty"`
+	RequestedModel         string                        `json:"requested_model,omitempty"`
+	ResolvedModel          string                        `json:"resolved_model,omitempty"`
 	AuthFileSnapshot       string                        `json:"auth_file_snapshot,omitempty"`
 	AuthIndex              string                        `json:"auth_index,omitempty"`
 	AccountSnapshot        string                        `json:"account_snapshot,omitempty"`
@@ -1484,7 +1543,16 @@ func (s *Service) accountWindowUsage(ctx context.Context, req AccountWindowUsage
 		if window.Period == "" {
 			return AccountWindowUsageResponse{}, errors.New("period must be current, previous, or previous_equal_range")
 		}
-		window.ModelScope = normalizeAccountWindowModelScope(window.ModelScope)
+		modelScopeProvided := window.ModelScopeProvided ||
+			strings.TrimSpace(window.ModelScope.Kind) != "" ||
+			strings.TrimSpace(window.ModelScope.Key) != "" ||
+			len(window.ModelScope.Models) > 0 || window.ModelScope.Complete
+		modelScopeCompleteSet := window.ModelScopeCompleteSet || window.ModelScope.Complete
+		window.ModelScope = normalizeAccountWindowModelScope(
+			window.ModelScope,
+			modelScopeProvided,
+			modelScopeCompleteSet,
+		)
 		if window.ModelScope.Kind == "" {
 			return AccountWindowUsageResponse{}, errors.New("model_scope is invalid")
 		}
@@ -3518,6 +3586,10 @@ func buildHeaderSnapshots(items []store.HeaderSnapshot) []HeaderSnapshot {
 		result = append(result, HeaderSnapshot{
 			EventHash:              item.EventHash,
 			TimestampMS:            item.TimestampMS,
+			Model:                  item.Model,
+			AnalyticsModel:         item.AnalyticsModel,
+			RequestedModel:         item.RequestedModel,
+			ResolvedModel:          item.ResolvedModel,
 			AuthFileSnapshot:       item.AuthFileSnapshot,
 			AuthIndex:              item.AuthIndex,
 			AccountSnapshot:        item.AccountSnapshot,
@@ -3766,10 +3838,18 @@ func normalizeAccountWindowPeriod(value string) string {
 	}
 }
 
-func normalizeAccountWindowModelScope(scope AccountWindowModelScope) AccountWindowModelScope {
+func normalizeAccountWindowModelScope(
+	scope AccountWindowModelScope,
+	provided bool,
+	completeSet bool,
+) AccountWindowModelScope {
 	scope.Kind = strings.ToLower(strings.TrimSpace(scope.Kind))
 	if scope.Kind == "" {
+		if provided {
+			return AccountWindowModelScope{}
+		}
 		scope.Kind = "all"
+		scope.Complete = true
 	}
 	switch scope.Kind {
 	case "all", "family", "models", "product", "feature":
@@ -3797,6 +3877,12 @@ func normalizeAccountWindowModelScope(scope AccountWindowModelScope) AccountWind
 	if (scope.Kind == "family" || scope.Kind == "product" || scope.Kind == "feature") && scope.Key == "" && len(scope.Models) == 0 {
 		return AccountWindowModelScope{}
 	}
+	if !completeSet {
+		switch scope.Kind {
+		case "all", "family", "models":
+			scope.Complete = true
+		}
+	}
 	return scope
 }
 
@@ -3823,23 +3909,24 @@ func classifyQuotaModelFamily(modelName string) string {
 }
 
 func accountWindowStatMatchesScope(row store.AccountWindowModelStat, scope AccountWindowModelScope) (matched bool, unmatched bool) {
+	if !scope.Complete {
+		return false, false
+	}
 	if scope.Kind == "all" {
 		return true, false
 	}
-	models := map[string]struct{}{}
-	for _, modelName := range scope.Models {
-		models[modelName] = struct{}{}
+	if codexquota.IsMainScope(scope.Kind, scope.Key) {
+		return codexquota.MatchMainUsage(row.Model, row.BillingModel)
+	}
+	if len(scope.Models) > 0 {
+		return codexquota.MatchModelScope(row.Model, row.BillingModel, scope.Models)
 	}
 	rowModels := []string{normalizeQuotaModelName(row.Model), normalizeQuotaModelName(row.BillingModel)}
-	if len(models) > 0 {
-		for _, modelName := range rowModels {
-			if _, ok := models[modelName]; ok {
-				return true, false
-			}
-		}
-		if scope.Kind != "family" {
-			return false, false
-		}
+	if scope.Kind != "family" {
+		return false, false
+	}
+	if len(rowModels) == 2 && rowModels[1] != "" {
+		rowModels = rowModels[1:]
 	}
 	if scope.Kind == "family" {
 		families := map[string]struct{}{}
@@ -3852,7 +3939,7 @@ func accountWindowStatMatchesScope(row store.AccountWindowModelStat, scope Accou
 		_, unknown := families["unknown"]
 		return false, unknown
 	}
-	return false, len(models) == 0
+	return false, true
 }
 
 func buildScopedAccountWindowUsageTotals(
@@ -3864,7 +3951,7 @@ func buildScopedAccountWindowUsageTotals(
 	results := make(map[int]accountWindowScopeResult, len(windows))
 	for index, window := range windows {
 		status := "complete"
-		if window.ModelScope.Kind != "all" {
+		if !window.ModelScope.Complete {
 			status = "unmatched"
 		}
 		results[index] = accountWindowScopeResult{status: status}
@@ -3880,9 +3967,6 @@ func buildScopedAccountWindowUsageTotals(
 		}
 		if matched {
 			filtered = append(filtered, row)
-			if result.status == "unmatched" {
-				result.status = "complete"
-			}
 		}
 		results[row.RequestIndex] = result
 	}

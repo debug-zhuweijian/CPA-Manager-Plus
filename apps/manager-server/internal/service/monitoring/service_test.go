@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/codexquota"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/store"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/usage"
 	"github.com/seakee/cpa-manager-plus/apps/manager-server/internal/usageidentity"
@@ -2724,8 +2725,157 @@ func TestAccountWindowUsageSeparatesPeriodsAndAppliesModelScopeAcrossOverlapping
 	if resp.Items[3].RequestKey != "exact-billing-model" || resp.Items[3].TotalRequests != 1 || resp.Items[3].ScopeMatchStatus != "complete" {
 		t.Fatalf("exact billing-model scope = %#v", resp.Items[3])
 	}
-	if resp.Items[4].RequestKey != "exact-unmatched" || resp.Items[4].Matched || resp.Items[4].ScopeMatchStatus != "unmatched" {
+	if resp.Items[4].RequestKey != "exact-unmatched" || resp.Items[4].Matched || resp.Items[4].ScopeMatchStatus != "complete" {
 		t.Fatalf("unmatched exact scope = %#v", resp.Items[4])
+	}
+}
+
+func TestAccountWindowUsageScopeCompletenessCompatibility(t *testing.T) {
+	tests := []struct {
+		name         string
+		payload      string
+		wantKind     string
+		wantComplete bool
+		wantValid    bool
+	}{
+		{name: "omitted legacy scope", payload: `{}`, wantKind: "all", wantComplete: true, wantValid: true},
+		{name: "legacy all without complete", payload: `{"model_scope":{"kind":"all"}}`, wantKind: "all", wantComplete: true, wantValid: true},
+		{name: "legacy models without complete", payload: `{"model_scope":{"kind":"models","models":["gpt-5.6-sol"]}}`, wantKind: "models", wantComplete: true, wantValid: true},
+		{name: "nested scope metadata remains forward compatible", payload: `{"model_scope":{"kind":"all","future_scope_metadata":{"source":"new-client"}}}`, wantKind: "all", wantComplete: true, wantValid: true},
+		{name: "feature defaults incomplete", payload: `{"model_scope":{"kind":"feature","key":"future_feature"}}`, wantKind: "feature", wantComplete: false, wantValid: true},
+		{name: "explicit incomplete all fails closed", payload: `{"model_scope":{"kind":"all","complete":false}}`, wantKind: "all", wantComplete: false, wantValid: true},
+		{name: "explicit incomplete models fail closed", payload: `{"model_scope":{"kind":"models","models":["gpt-5.6-sol"],"complete":false}}`, wantKind: "models", wantComplete: false, wantValid: true},
+		{name: "explicit empty scope is invalid", payload: `{"model_scope":{}}`, wantValid: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var target AccountWindowUsageTarget
+			if err := json.Unmarshal([]byte(test.payload), &target); err != nil {
+				t.Fatalf("unmarshal target: %v", err)
+			}
+			provided := target.ModelScopeProvided ||
+				strings.TrimSpace(target.ModelScope.Kind) != "" ||
+				strings.TrimSpace(target.ModelScope.Key) != "" ||
+				len(target.ModelScope.Models) > 0 || target.ModelScope.Complete
+			completeSet := target.ModelScopeCompleteSet || target.ModelScope.Complete
+			scope := normalizeAccountWindowModelScope(target.ModelScope, provided, completeSet)
+			if !test.wantValid {
+				if scope.Kind != "" {
+					t.Fatalf("scope = %#v, want invalid", scope)
+				}
+				return
+			}
+			if scope.Kind != test.wantKind || scope.Complete != test.wantComplete {
+				t.Fatalf("scope = %#v, want kind=%q complete=%v", scope, test.wantKind, test.wantComplete)
+			}
+		})
+	}
+}
+
+func TestAccountWindowUsageIsolatesCodexMainSparkAndUnknownFeatureScopes(t *testing.T) {
+	db := newMonitoringTestStore(t)
+	ctx := context.Background()
+	baseMS := int64(1_700_100_500_000)
+	events := []usage.Event{
+		monitoringEvent("codex-main-direct", baseMS+1_000, "gpt-5.6-sol", "auth-1", "source-a", false, 60, 40, 0, 0, 100, nil),
+		monitoringEvent("codex-main-alias", baseMS+2_000, "my-codex", "auth-1", "source-a", false, 180, 120, 0, 0, 300, nil),
+		monitoringEvent("codex-spark-direct", baseMS+3_000, codexquota.SparkModelID, "auth-1", "source-a", false, 120, 80, 0, 0, 200, nil),
+		monitoringEvent("codex-spark-alias", baseMS+4_000, "my-spark", "auth-1", "source-a", false, 240, 160, 0, 0, 400, nil),
+	}
+	events[1].RequestedModel = "my-codex"
+	events[1].ResolvedModel = "gpt-5.6-sol"
+	events[3].RequestedModel = "my-spark"
+	events[3].ResolvedModel = codexquota.SparkModelID
+	for index := range events {
+		events[index].AccountSnapshot = "quota@example.com"
+		events[index].AuthFileSnapshot = "codex.json"
+		events[index].AuthProviderSnapshot = "codex"
+	}
+	if _, err := db.InsertEvents(ctx, events); err != nil {
+		t.Fatalf("insert scoped Codex events: %v", err)
+	}
+
+	target := func(requestKey string, fromMS, toMS int64, scope AccountWindowModelScope) AccountWindowUsageTarget {
+		return AccountWindowUsageTarget{
+			RequestKey: requestKey, RowKey: "row-1", ProviderWindowID: requestKey,
+			Period: "current", FromMS: fromMS, ToMS: toMS, ModelScope: scope,
+			AccountSnapshot: "quota@example.com", AuthFileSnapshot: "codex.json",
+			AuthProviderSnapshot: "codex", AuthIndex: "auth-1", Source: "source-a",
+		}
+	}
+	incompleteTarget := func(requestKey string, scope AccountWindowModelScope) AccountWindowUsageTarget {
+		value := target(requestKey, baseMS, baseMS+5_000, scope)
+		value.ModelScopeCompleteSet = true
+		return value
+	}
+	response, err := New(db).AccountWindowUsage(ctx, AccountWindowUsageRequest{Windows: []AccountWindowUsageTarget{
+		target("main", baseMS, baseMS+5_000, AccountWindowModelScope{Kind: "family", Key: codexquota.MainScopeKey, Complete: true}),
+		target("spark", baseMS, baseMS+5_000, AccountWindowModelScope{Kind: "models", Models: []string{codexquota.SparkModelID}, Complete: true}),
+		target("spark-zero", baseMS, baseMS+2_500, AccountWindowModelScope{Kind: "models", Models: []string{codexquota.SparkModelID}, Complete: true}),
+		incompleteTarget("future-feature", AccountWindowModelScope{Kind: "feature", Key: "future_feature"}),
+		incompleteTarget("future-feature-models", AccountWindowModelScope{Kind: "feature", Key: "future_feature", Models: []string{"gpt-5.6-sol"}}),
+		incompleteTarget("incomplete-all", AccountWindowModelScope{Kind: "all"}),
+	}})
+	if err != nil {
+		t.Fatalf("account window usage: %v", err)
+	}
+	if len(response.Items) != 6 {
+		t.Fatalf("items = %#v", response.Items)
+	}
+	if item := response.Items[0]; !item.Matched || item.TotalRequests != 2 || item.TotalTokens != 400 || item.ScopeMatchStatus != "complete" {
+		t.Fatalf("main Codex usage = %#v", item)
+	}
+	if item := response.Items[1]; !item.Matched || item.TotalRequests != 2 || item.TotalTokens != 600 || item.ScopeMatchStatus != "complete" {
+		t.Fatalf("Spark usage = %#v", item)
+	}
+	if item := response.Items[2]; item.Matched || item.SyncStatus != "empty" || item.TotalRequests != 0 || item.TotalTokens != 0 || item.TotalCost != 0 || item.ScopeMatchStatus != "complete" {
+		t.Fatalf("unused Spark window = %#v", item)
+	}
+	if item := response.Items[3]; item.Matched || item.SyncStatus != "empty" || item.TotalRequests != 0 || item.TotalTokens != 0 || item.TotalCost != 0 || item.ScopeMatchStatus != "unmatched" {
+		t.Fatalf("unknown feature usage = %#v", item)
+	}
+	for _, index := range []int{4, 5} {
+		if item := response.Items[index]; item.Matched || item.SyncStatus != "empty" || item.TotalRequests != 0 || item.TotalTokens != 0 || item.TotalCost != 0 || item.ScopeMatchStatus != "unmatched" {
+			t.Fatalf("incomplete scope usage = %#v", item)
+		}
+	}
+}
+
+func TestAccountWindowUsagePrefersResolvedBillingIdentityOverSparkShapedRequestAlias(t *testing.T) {
+	db := newMonitoringTestStore(t)
+	ctx := context.Background()
+	baseMS := int64(1_700_100_750_000)
+	event := monitoringEvent("codex-reverse-alias", baseMS+1_000, codexquota.SparkModelID, "auth-1", "source-a", false, 60, 40, 0, 0, 100, nil)
+	event.RequestedModel = codexquota.SparkModelID
+	event.ResolvedModel = "gpt-5.6-sol"
+	event.AccountSnapshot = "reverse-alias@example.com"
+	event.AuthFileSnapshot = "codex.json"
+	event.AuthProviderSnapshot = "codex"
+	if _, err := db.InsertEvents(ctx, []usage.Event{event}); err != nil {
+		t.Fatalf("insert reverse alias event: %v", err)
+	}
+
+	target := func(requestKey string, scope AccountWindowModelScope) AccountWindowUsageTarget {
+		return AccountWindowUsageTarget{
+			RequestKey: requestKey, RowKey: "row-1", ProviderWindowID: requestKey,
+			Period: "current", FromMS: baseMS, ToMS: baseMS + 2_000, ModelScope: scope,
+			AccountSnapshot: "reverse-alias@example.com", AuthFileSnapshot: "codex.json",
+			AuthProviderSnapshot: "codex", AuthIndex: "auth-1", Source: "source-a",
+		}
+	}
+	response, err := New(db).AccountWindowUsage(ctx, AccountWindowUsageRequest{Windows: []AccountWindowUsageTarget{
+		target("main", AccountWindowModelScope{Kind: "family", Key: codexquota.MainScopeKey, Complete: true}),
+		target("spark", AccountWindowModelScope{Kind: "models", Models: []string{codexquota.SparkModelID}, Complete: true}),
+	}})
+	if err != nil {
+		t.Fatalf("account window usage: %v", err)
+	}
+	if item := response.Items[0]; !item.Matched || item.TotalRequests != 1 || item.TotalTokens != 100 || item.ScopeMatchStatus != "complete" {
+		t.Fatalf("main reverse alias usage = %#v", item)
+	}
+	if item := response.Items[1]; item.Matched || item.TotalRequests != 0 || item.TotalTokens != 0 || item.ScopeMatchStatus != "complete" {
+		t.Fatalf("spark reverse alias usage = %#v", item)
 	}
 }
 

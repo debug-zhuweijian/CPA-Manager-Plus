@@ -6,7 +6,7 @@ import {
   type AccountGroupedQuotaAvailabilitySummary,
 } from './accountQuotaSummary';
 import type { AccountQuotaWindowKind } from './accountQuotaDisplayWindows';
-import type { QuotaResetAccuracy } from '@/types';
+import type { QuotaModelScope, QuotaResetAccuracy } from '@/types';
 import {
   buildAccountRecommendation,
   isAccountRecommendationEvidenceSensitive,
@@ -14,6 +14,7 @@ import {
 } from './quotaRecommendations';
 import type { UsageValueSource } from './usageValueRows';
 import { isValidQuotaResetAtMs } from '@/utils/quota/formatters';
+import { isCodexMainQuotaWindow } from '@/utils/quota/codexQuota';
 import {
   classifyAccountCredentialStatusEvidence,
   classifyAccountObservedDiagnosticEvidence,
@@ -77,6 +78,7 @@ export interface AccountListQuotaWindowPresentation {
   resetAtMs: number | null;
   resetAccuracy: QuotaResetAccuracy;
   groupLabel?: string;
+  modelScope?: QuotaModelScope;
 }
 
 export type AccountListQuotaWindowInput = Omit<
@@ -565,16 +567,32 @@ const getResetForLimitKind = (
     };
   }
 
-  const codexResetLabel =
+  const codexReset =
     kind === 'monthly'
-      ? codexStatus?.monthlyResetLabel
+      ? {
+          resetLabel: codexStatus?.monthlyResetLabel,
+          resetAtMs: codexStatus?.monthlyResetAtMs ?? null,
+          resetAccuracy: codexStatus?.monthlyResetAccuracy ?? 'unknown',
+        }
       : kind === 'weekly'
-        ? codexStatus?.weeklyResetLabel
+        ? {
+            resetLabel: codexStatus?.weeklyResetLabel,
+            resetAtMs: codexStatus?.weeklyResetAtMs ?? null,
+            resetAccuracy: codexStatus?.weeklyResetAccuracy ?? 'unknown',
+          }
         : kind === 'five_hour'
-          ? codexStatus?.fiveHourResetLabel
+          ? {
+              resetLabel: codexStatus?.fiveHourResetLabel,
+              resetAtMs: codexStatus?.fiveHourResetAtMs ?? null,
+              resetAccuracy: codexStatus?.fiveHourResetAccuracy ?? 'unknown',
+            }
           : null;
-  if (codexResetLabel) {
-    return { resetLabel: codexResetLabel, resetAtMs: null, resetAccuracy: 'unknown' };
+  if (codexReset && (codexReset.resetLabel || codexReset.resetAtMs !== null)) {
+    return {
+      resetLabel: codexReset.resetLabel ?? fallback.resetLabel,
+      resetAtMs: codexReset.resetAtMs ?? null,
+      resetAccuracy: codexReset.resetAccuracy ?? 'unknown',
+    };
   }
   return fallback;
 };
@@ -696,10 +714,7 @@ const resolveHealthStatus = (
   const actionableInspection = isAccountInspectionActionable(row, resolvedRequestEvidence)
     ? row.inspection
     : null;
-  const statusInspection = isAccountInspectionStatusEvidenceCurrent(
-    row,
-    resolvedRequestEvidence
-  )
+  const statusInspection = isAccountInspectionStatusEvidenceCurrent(row, resolvedRequestEvidence)
     ? row.inspection
     : null;
   const hasCredentialStatusProblem = isAccountCredentialStatusProblemCurrent(
@@ -719,9 +734,10 @@ const resolveHealthStatus = (
   const quotaRefreshDetail = quotaRefreshProblem
     ? getFirstDetail(row.quota.error, getHttpStatusDetail(row.quota.errorStatus))
     : '';
-  const observedDiagnosticDetail = !exceptionProblem && hasObservedDiagnosticProblem
-    ? [row.quota.observedErrorKind, row.quota.observedErrorCode].filter(Boolean).join(' / ')
-    : '';
+  const observedDiagnosticDetail =
+    !exceptionProblem && hasObservedDiagnosticProblem
+      ? [row.quota.observedErrorKind, row.quota.observedErrorCode].filter(Boolean).join(' / ')
+      : '';
   const resolvedRequestQuotaEvidence = resolveAccountRequestQuotaEvidence(requestEvidenceInput);
   const requestQuotaEvidence = isAccountRequestQuotaEvidenceCurrent(
     row,
@@ -1148,11 +1164,13 @@ export const buildAccountListItem = (
       };
     }
   );
+  const accountQuotaWindows =
+    row.provider === 'codex' ? quotaWindows.filter(isCodexMainQuotaWindow) : quotaWindows;
   const health = resolveHealthStatus(
     row,
     quotaCooldown,
     options.codexStatus ?? null,
-    quotaWindows,
+    accountQuotaWindows,
     options.requestEvidence
   );
 

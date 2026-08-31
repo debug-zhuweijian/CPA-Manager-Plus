@@ -19,7 +19,6 @@ import type {
   CodexQuotaData,
   KimiQuotaData,
 } from '@/utils/quota';
-import { resetCodexQuota } from '@/services/api/codexQuota';
 import {
   buildCodexQuotaWindows,
   fetchAntigravityQuota,
@@ -77,12 +76,6 @@ export interface QuotaConfig<TState, TData> {
     snapshot: UsageHeaderSnapshot | undefined,
     t: TFunction
   ) => TState | undefined;
-  resetQuota?: (
-    file: AuthFileItem,
-    t: TFunction,
-    requestScope?: AuthFilesApiRequestScope
-  ) => Promise<TData>;
-  canResetQuota?: (file: AuthFileItem, quota: TState | undefined) => boolean;
 }
 
 export const getQuotaStoreKey = <TState, TData>(
@@ -110,10 +103,28 @@ export const buildQuotaFailureState = <TState, TData>(
   file: AuthFileItem | undefined,
   activeState: TState | undefined,
   failedAtMs = Date.now()
-): TState =>
-  config.buildFailureState
-    ? config.buildFailureState(message, status, file, activeState, failedAtMs)
-    : config.buildErrorState(message, status, file);
+): TState => {
+  if (config.buildFailureState) {
+    return config.buildFailureState(message, status, file, activeState, failedAtMs);
+  }
+
+  const errorState = config.buildErrorState(message, status, file);
+  if (!activeState || typeof activeState !== 'object') {
+    return { ...errorState, failedAtMs } as TState;
+  }
+
+  // Provider states own the payload shape. Preserve it on a transient refresh
+  // failure while replacing only the lifecycle/error metadata from the failed
+  // request. This keeps non-Codex windows/groups/rows/billing visible too.
+  return {
+    ...errorState,
+    ...activeState,
+    status: 'error',
+    error: message,
+    errorStatus: status,
+    failedAtMs,
+  } as TState;
+};
 
 type DisplayQuotaState = {
   status?: 'idle' | 'loading' | 'success' | 'error';
@@ -236,10 +247,7 @@ const mergeCodexQuotaWindows = (
       ...(aliases.length > 0 ? { providerWindowAliases: aliases } : {}),
     };
   });
-  return [
-    ...mergedWindows,
-    ...observedWindows.filter((_, index) => !usedObserved.has(index)),
-  ];
+  return [...mergedWindows, ...observedWindows.filter((_, index) => !usedObserved.has(index))];
 };
 
 const hasKnownResetCreditCount = (quota: CodexQuotaMergeState): boolean => {
@@ -332,7 +340,9 @@ const appendMissingObservedQuotaWindows = <TState extends DisplayQuotaState>(
         ) === observedIndex
     );
   };
-  const missingWindows = observedWindows.filter((_, observedIndex) => !isAlreadyRepresented(observedIndex));
+  const missingWindows = observedWindows.filter(
+    (_, observedIndex) => !isAlreadyRepresented(observedIndex)
+  );
   if (missingWindows.length === 0) return activeQuota;
   const merged: CodexQuotaMergeState = {
     ...active,
@@ -642,9 +652,6 @@ export const CODEX_CONFIG: QuotaConfig<CodexQuotaState, CodexQuotaData> = {
   buildFailureState: buildCodexQuotaFailureState,
   scopeState: scopeCredentialQuotaState,
   buildObservedState: buildObservedCodexQuotaState,
-  resetQuota: resetCodexQuota,
-  canResetQuota: (_file, quota) =>
-    quota?.status === 'success' && (quota.rateLimitResetCreditsAvailableCount ?? 0) > 0,
 };
 
 export const KIMI_CONFIG: QuotaConfig<KimiQuotaState, KimiQuotaData> = {
